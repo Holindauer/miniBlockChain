@@ -1,5 +1,8 @@
 use sha2::{Sha256, Digest};
 
+// block.rs contains structs and functions for fascilitating the creation and 
+// manipulation of blocks in the blockchain.
+
 /**
  * @notice Block structs are what are linked together to form the blockchain.
  * @param  timestamp - time the block was created (in Unix time).
@@ -21,7 +24,7 @@ struct Block {
  * @param recipientAdress - the address of the recipient.
  * @param amount - the amount of the transaction.
  * @param signature - the signature of the transaction represented as a vector of bytes.
-*/
+*/  
 struct Transaction {
     sender_adress: [u8; 20],
     recipient_adress: [u8; 20],
