@@ -1,4 +1,5 @@
 
+// transactions.rs
 
 pub fn send_transaction(sender: &String, recipient: &String, amount: &String) {
     // Stub function - replace with actual implementation

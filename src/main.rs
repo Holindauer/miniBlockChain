@@ -1,12 +1,12 @@
-use std::env;
-use std::net::{TcpListener, TcpStream};
-use std::io::Read;
 use std::thread;
+use tokio::runtime::Runtime;
+use std::env;
 
 mod accounts;
 mod block;
 mod transactions;
 mod validation;
+mod server;
 
 /**
  * @notice main.rs runs a blockchain node. There are three options when connecting a node from the CLI: 
@@ -50,21 +50,28 @@ mod validation;
  *     be minimal until the above two protocols are in place. 
  */
 
-
-
-// main.rs
-
-fn handle_client(mut stream: TcpStream) {
-    let mut buffer = [0; 1024];
-    match stream.read(&mut buffer) {
-        Ok(_) => {
-            println!("Received: {}", String::from_utf8_lossy(&buffer));
-        },
-        Err(e) => println!("Failed to receive data: {}", e),
-    }
-}
-
 fn main() -> std::io::Result<()> {
+
+    // new thread is spawned here that will run the server. This is not a final implementation. I am using
+    // it to start of the server for development purposes. Running of the server willl be done by validators.
+    // A more robust version of this will be moved into the validation.rs module eventually.
+    thread::spawn(|| {
+        // Create a new Tokio runtime for the server thread
+        let rt = Runtime::new().unwrap();
+
+        // Use the runtime to block on the asynchronous server task
+        rt.block_on(async {
+            match server::start_server().await {
+                Ok(_) => println!("Server shut down successfully."),
+                Err(e) => eprintln!("Server encountered an error: {}", e),
+            }
+        });
+    });
+
+    // Simulating some delay to ensure the server starts listening before any action is taken
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    // Here is where the actual node client code begins: 
 
     // read CLI args into vector
     let args: Vec<String> = env::args().collect();
@@ -84,19 +91,15 @@ fn main() -> std::io::Result<()> {
         let recipient = &args[2];
         let transaction_amount = &args[3];
 
-        println!("Client Side Arguments");
-        println!("Private Key: {}", private_key);
-        println!("Recipient: {}", recipient);
-        println!("Transaction Amount: {}", transaction_amount);
-        
         // validate transaction 
         transactions::send_transaction(private_key, recipient, transaction_amount);
 
     }// Validation Specified 
     else if args.len() == 3 && args[1] == "validate" { 
 
+        // extract provided arguments:
         let private_key = &args[2];
-
+        
         validation::run_validation(private_key);
     } 
     else { // Improper Command
@@ -104,29 +107,5 @@ fn main() -> std::io::Result<()> {
         return Ok(());
     }
     
-
-    // // ! At some point here: Split this logic up into seperate functions 
-    // // ! for either making transactions, account creation, or validation
-
-    // // Create a new TcpListener and start listening for incoming connections
-    // let listener = TcpListener::bind("0.0.0.0:7878")?;
-    // println!("Server listening on port 7878");
-
-    // // For each incoming connection, spawn a new thread  
-    // for stream in listener.incoming() {
-
-    //     match stream {
-    //         Ok(stream) => {
-
-    //             println!("New connection: {}", stream.peer_addr().unwrap());
-    //             thread::spawn(move || handle_client(stream));
-    //         }
-    //         Err(e) => {
-    //             println!("Error: {}", e);
-    //         }
-    //     }
-    // }
-
-
     Ok(())
 }
