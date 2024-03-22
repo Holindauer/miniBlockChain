@@ -43,7 +43,7 @@ fn generate_keys() -> (String, String) {
     ("private_key".to_string(), "public_key".to_string())   
 }
 //
-fn create_account() {
+pub fn account_creation() {
     // Stub function - replace with actual implementation
 
     // generate a new key pair
