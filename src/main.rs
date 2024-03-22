@@ -98,8 +98,8 @@ fn main() -> std::io::Result<()> {
     else if args.len() == 3 && args[1] == "validate" { 
 
         // extract provided arguments:
-        let private_key = &args[2];
-        
+        let private_key: &String = &args[2];
+
         validation::run_validation(private_key);
     } 
     else { // Improper Command

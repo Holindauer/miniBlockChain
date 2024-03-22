@@ -3,11 +3,18 @@ use tokio::net::TcpStream;
 use serde::{Serialize, Deserialize};
 use serde_json;
 
+extern crate secp256k1;
+extern crate rand;
+
+use secp256k1::{Secp256k1, SecretKey, PublicKey};
+use rand::{thread_rng, RngCore}; // Ensure thread_rng is imported here
+use secp256k1::Error;
 
 #[derive(Serialize, Deserialize)]
 struct NetworkMessage {
     command: String,
-    data: String, // Consider more specific types or structures as needed
+    public_key: String,
+    private_key: String,
 }
 
 async fn send_network_message(addr: &str, message: NetworkMessage) -> tokio::io::Result<()> {
@@ -26,14 +33,39 @@ async fn send_network_message(addr: &str, message: NetworkMessage) -> tokio::io:
 
 async fn send_account_creation_msg() -> tokio::io::Result<()> {
 
+    // Generate a new keypair
+    let (secret_key, public_key) = generate_keypair()?;
+
     // example msg of account creation
     let message: NetworkMessage = NetworkMessage {
         command: "create_account".to_string(),
-        data: "Sample data for account creation".to_string(), // Sample data
+        public_key: public_key.to_string(),
+        private_key: secret_key.to_string(),
     };
 
     // Sending the message to a specific address or broadcast it
     send_network_message("127.0.0.1:8080", message).await
+}
+
+fn generate_keypair() -> Result<(SecretKey, PublicKey), secp256k1::Error> {
+
+    // create instance of secp256k1 
+    let secp = Secp256k1::new();
+
+    // Create a new thread_rng (cryptographically secure random number generator)
+    let mut rng = thread_rng();
+
+    // Generate a random 256-bit number for the private key
+    let mut secret_key_bytes = [0u8; 32];
+    rng.fill_bytes(&mut secret_key_bytes);
+
+    // Create a SecretKey from the random bytes 
+    let secret_key = SecretKey::from_slice(&secret_key_bytes)?;
+
+    // Derive the public key from the secret key
+    let public_key = PublicKey::from_secret_key(&secp, &secret_key);
+
+    Ok((secret_key, public_key))
 }
 
 pub fn account_creation() {
