@@ -9,20 +9,24 @@ mod validation;
 mod server;
 
 /**
- * @notice main.rs runs a blockchain node. There are three options when connecting a node from the CLI: 
+ * @notice main.rs runs a blockchain node which connects to a TCP server in order to interact with the blockchain. 
+ *         There are three options when connecting a node from the CLI: Account Creaction, Trancation, Validation
  *
  * Acount Creation:
  *  
- * 1.) The first is to make an account by providing the [make] argument. This will trigger a validation 
- *     event across all users running validation nodes. A new public and private key will be generated
- *     using elliptic curve cryptography (secp256k1). Validation by the network minimal in this case. 
+ * 1.) The first is to make an account by providing the [make] argument when running the node software. 
+ *  
+ *      cargo run make
+ *  
+ *     This will alert validators that a new public and private key has been generated and needs to be updated 
+ *     across the distributed network. The key is generated on the client side using elliptic curve cryptography 
+ *     (secp256k1)and distributed to the network. Validators are responsible for fascilitaing these 
+ *     transcations within the network, which will include minimal checks at this stage in the development.
  *     Just checking that a prexisting account is not being overwritten (extremely unlikely since using 
- *     secp256k1). The new accoount will aslo be integrated into the merkel tree that contains all 
+ *     secp256k1). The new account will aslo be integrated into the merkel tree that contains all 
  *     (private-key, account-balance) pairs of all accounts created up to this point. Accounts not creates 
  *     yet are implicitly at a balance of 0 and "become accounts" that can transactions once created using 
- *     [make] from CLI or because ownership has been transfered to an account that has not been created 
- *     yet, which will trigger its creation (not possible to create private key given discrete log, but 
- *     account ablance could potentially be stored...)
+ *     [make] from CLI.
  * 
  *     This is done in the accounts.rs modulue. 
  * 
@@ -33,7 +37,7 @@ mod server;
  * 
  * 2.) The second option is to send a transaction by providing the following arguments to the CLI:
  * 
- *     [private key] [recipiant public key] [transaction amount]
+ *     cargo run [private key] [recipiant public key] [transaction amount]
  * 
  *     This will trigger a validation event to all users currently running nodes that a new transaction 
  *     is waiting to be validated. Validation will involves searching the merkel tree to find the private 
@@ -44,32 +48,48 @@ mod server;
  *  
  * Validation:
  * 
- * 3.) Validation will be a proof of stake system. Meaning that in order to participate, you must provide 
- *     an amount of tokens to participate as a validator. Validators will listen to all incoming events 
- *     entering the network and apply vallidation for either account creation or transactions. This will 
- *     be minimal until the above two protocols are in place. 
+ * 3.) Whereas Transactions and Account Creations are shorted lived processes for the user. Running the [validate]
+ *     argument will contunually run the validation process until the program is exited. Validators keep the TCP
+ *     server online, fascilitating the computation and documentation of incoming transactions and account creations 
+ *     within the shared ledger (blockchain). 
+ *     
+ *     There are two datastructures that are maintained by validators: 
+ * 
+ *          - The blockchain is a linked list of Block structs storing events that have occured.
+ *          - A merkel tree that stores (public-key, account-balance) pairs. 
+ * 
+ *     The blockchain data and merkel tree data are both stored in seperate json files. Each file contains the data
+ *     structure itself, as well as its accumulated hash. These files are maintained on the client side by users
+ *     running the validation process of the node software. Validation ensures the integrity of the blockchain
+ *     and merkel tree data in the following two ways:
+ *     
+ *          - Transactions are checked for sufficient balance. Accounts are checked for duplication.
+ *          - The more import validation check is to make sure that the hash of the blockchain and merkel tree
+ *            before and after the transaction are the same across all nodes currently running the validation
+ *            process. A majority consensis across nodes is required to validate a transaction.
+ * 
  */
 
 fn main() -> std::io::Result<()> {
 
-    // new thread is spawned here that will run the server. This is not a final implementation. I am using
-    // it to start of the server for development purposes. Running of the server willl be done by validators.
-    // A more robust version of this will be moved into the validation.rs module eventually.
-    thread::spawn(|| {
-        // Create a new Tokio runtime for the server thread
-        let rt = Runtime::new().unwrap();
+    // // new thread is spawned here that will run the server. This is not a final implementation. I am using
+    // // it to start of the server for development purposes. Running of the server willl be done by validators.
+    // // A more robust version of this will be moved into the validation.rs module eventually.
+    // thread::spawn(|| {
+    //     // Create a new Tokio runtime for the server thread
+    //     let rt = Runtime::new().unwrap();
 
-        // Use the runtime to block on the asynchronous server task
-        rt.block_on(async {
-            match server::start_server().await {
-                Ok(_) => println!("Server shut down successfully."),
-                Err(e) => eprintln!("Server encountered an error: {}", e),
-            }
-        });
-    });
+    //     // Use the runtime to block on the asynchronous server task
+    //     rt.block_on(async {
+    //         match server::start_server().await {
+    //             Ok(_) => println!("Server shut down successfully."),
+    //             Err(e) => eprintln!("Server encountered an error: {}", e),
+    //         }
+    //     });
+    // });
 
-    // Simulating some delay to ensure the server starts listening before any action is taken
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    // // Simulating some delay to ensure the server starts listening before any action is taken
+    // std::thread::sleep(std::time::Duration::from_secs(1));
 
     // Here is where the actual node client code begins: 
 
