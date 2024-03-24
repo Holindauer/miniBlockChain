@@ -17,10 +17,10 @@ const PORT_NUMBER: &str = "127.0.0.1:8080";
  * blockchain account for the purpose of sending to other nodes in the network.
  */
 #[derive(Serialize, Deserialize)]
-struct KeyPair {
-    action: String,
-    public_key: String,
-    private_key: String,
+pub struct AccountCreationRequest {
+    pub action: String,
+    pub public_key: String,
+    // TODO - other data
 }
 
 /**
@@ -51,10 +51,9 @@ async fn send_account_creation_msg() -> tokio::io::Result<()> {
     let (secret_key, public_key) = generate_keypair()?;
 
     // example msg of account creation
-    let message: KeyPair = KeyPair {
+    let message: AccountCreationRequest = AccountCreationRequest {
         action: "make".to_string(),
         public_key: public_key.to_string(),
-        private_key: secret_key.to_string(),
     };
 
     // Sending the message to a specific address or broadcast it
@@ -65,7 +64,7 @@ async fn send_account_creation_msg() -> tokio::io::Result<()> {
 /**
  * @notice send_network_msg() asynchronously sends the generated 
  */
-async fn send_network_msg(addr: &str, message: KeyPair) -> tokio::io::Result<()> {
+async fn send_network_msg(addr: &str, message: AccountCreationRequest) -> tokio::io::Result<()> {
 
     // Connect to the server
     let mut stream: TcpStream = TcpStream::connect(addr).await?;

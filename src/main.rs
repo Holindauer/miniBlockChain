@@ -6,7 +6,6 @@ mod accounts;
 mod block;
 mod transactions;
 mod validation;
-mod server;
 
 /**
  * @notice main.rs runs a blockchain node which connects to a TCP server in order to interact with the blockchain. 
@@ -71,27 +70,6 @@ mod server;
  */
 
 fn main() -> std::io::Result<()> {
-
-    // // new thread is spawned here that will run the server. This is not a final implementation. I am using
-    // // it to start of the server for development purposes. Running of the server willl be done by validators.
-    // // A more robust version of this will be moved into the validation.rs module eventually.
-    // thread::spawn(|| {
-    //     // Create a new Tokio runtime for the server thread
-    //     let rt = Runtime::new().unwrap();
-
-    //     // Use the runtime to block on the asynchronous server task
-    //     rt.block_on(async {
-    //         match server::start_server().await {
-    //             Ok(_) => println!("Server shut down successfully."),
-    //             Err(e) => eprintln!("Server encountered an error: {}", e),
-    //         }
-    //     });
-    // });
-
-    // // Simulating some delay to ensure the server starts listening before any action is taken
-    // std::thread::sleep(std::time::Duration::from_secs(1));
-
-    // Here is where the actual node client code begins: 
 
     // read CLI args into vector
     let args: Vec<String> = env::args().collect();
