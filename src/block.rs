@@ -1,4 +1,6 @@
 use sha2::{Sha256, Digest};
+use std::collections::VecDeque;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 // block.rs contains structs and functions for fascilitating the creation and 
 // manipulation of blocks in the blockchain.
@@ -26,113 +28,113 @@ struct Block {
  * @param signature - the signature of the transaction represented as a vector of bytes.
 */  
 struct Transaction {
-    sender_adress: [u8; 20],
-    recipient_adress: [u8; 20],
+    sender_address: [u8; 20],
+    recipient_address: [u8; 20],
     amount: f32,
     signature: Vec<u8>,
 }
 
+
 /**
  * @notice the Blockchain struct links Blocks to form the blockchain.
  * @param chain - a vector of Blocks that have been added to the blockchain.
- * @param pending_transactions - a vector of Transactions that must be validated
- *        before being added to the blockchain.
+ * @param transaction_queue - a queue of transactions that have not yet been added to a block.
 */
 struct Blockchain {
     chain: Vec<Block>,
-    pending_transactions: Vec<Transaction>,
+    transaction_queue: VecDeque<Transaction>,
 }
-
 
 /**
- * @notice - This function takes a block and sets the hash of the block to the
- * hash of the block's data.
- * @param block - the block to set the hash of.
- * @return the block with the hash set.
-*/
-fn set_block_hash(mut block: Box<Block>) -> Box<Block> {
-    
-    // Create a new SHA256 object
-    let mut hasher = Sha256::new();
+ * @notice the Blockchain struct containsv the following  methods for creating and manipulating blocks.
+ * @dev These methods are used within validation.rs to push validated transactions to the blockchain.
+ */
+impl Blockchain {
 
-    // Convert the block to a string and input data into hasher
-    hasher.update(block.timestamp.to_string().as_bytes());
-    hasher.update(&block.prev_hash);
-    hasher.update(&block.data);
+    // Initialize a new blockchain with a genesis block
+    fn new() -> Self {
 
-    // Finalize the hash and store it in the block
-    let result = hasher.finalize().into_iter().collect::<Vec<u8>>();
-    block.hash.copy_from_slice(&result[..32]);
-
-    block
-}
-
-// unit test for set_block_hash
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use sha2::{Sha256, Digest};
-
-    #[test]
-    fn test_set_block_hash() {
-
-        // Create a test block
-        let data: Vec<u8> = b"test data".to_vec();
-        let prev_hash: [u8; 32] = [0u8; 32]; // Example previous hash
-        let block: Block = Block {
-            timestamp: 123456789,
-            hash: [0; 32],
-            prev_hash,
-            data: data.clone(),
+        // Create a new blockchain 
+        let mut blockchain: Blockchain = Blockchain {
+            chain: Vec::new(),
+            transaction_queue: VecDeque::new(),
         };
+
+        // Create a genesis block
+        blockchain.create_genesis_block();
+        blockchain
+    }
+
+    // Method to create a genesis block (first block in the chain)
+    fn create_genesis_block(&mut self) {
+        let genesis_block = Block {
+            timestamp: 0,
+            hash: [0; 32],
+            prev_hash: [0; 32],
+            data: b"Genesis Block".to_vec(), // byte vec
+        };
+        self.chain.push(genesis_block);
+    }
+
+    // Method to enqueue an incoming transaction
+    fn add_transaction(&mut self, transaction: Transaction) {
+        self.transaction_queue.push_back(transaction);
+    }
+
+    // Method to create a new block from pending transactions
+    fn create_block(&mut self, data: Vec<u8>) -> Box<Block> {
+
+        // retrieve the hash of the last block in the chain
+        let prev_hash: [u8; 32] = self.chain.last().unwrap().hash;
+
+        // create new block 
+        let block: Block = Block {
+            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            hash: [0; 32], // <-- placeholder, hash set in set_block_hash() below
+            prev_hash,
+            data,
+        };
+        self.set_block_hash(Box::new(block))
+    }
+
+    // Method to set the hash of a block
+    fn set_block_hash(&self, mut block: Box<Block>) -> Box<Block> {
         
-        // Create the expected hash manually
+        // create new Sha256 hasher
         let mut hasher = Sha256::new();
+
+        // feed block data to the hasher
         hasher.update(block.timestamp.to_string().as_bytes());
         hasher.update(&block.prev_hash);
-        hasher.update(&data);
-        let expected_hash = hasher.finalize();
+        hasher.update(&block.data);
 
-        // Box the block to comply with set_block_hash signature
-        let boxed_block = Box::new(block);
-        let result_block = set_block_hash(boxed_block);
-
-        assert_eq!(result_block.hash, *expected_hash);
+        // finalize the hash and copy it to the block
+        let result = hasher.finalize().into_iter().collect::<Vec<u8>>();
+        block.hash.copy_from_slice(&result[..32]);
+        block
     }
 }
 
-/**
- * @notice - This function creates a new block with the given data and previous
- * hash. It then sets the hash of the block and returns the block.
- * @param data - the data to store in the block.
- * @param prev_hash - the hash of the previous block.
- * @return the new block with the hash set.
-*/
-fn new_block(data: Vec<u8>, prev_hash: [u8; 32]) -> Box<Block> {
-    let block: Block = Block {
-        timestamp: 0, // You might want to capture the actual timestamp here
-        hash: [0; 32],
-        prev_hash,
-        data,
-    };
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let boxed_block = Box::new(block);
+    #[test]
+    fn test_block_creation() {
 
-    // Assuming setBlockHash is modified to take a Box<Block>
-    set_block_hash(boxed_block)
-}
+        // create a new blockchain w/ just the genesis block
+        let mut blockchain: Blockchain = Blockchain::new();
+        assert_eq!(blockchain.chain.len(), 1, "Blockchain should have 1 block after creation");
+        assert_eq!(blockchain.chain[0].data, b"Genesis Block", "Genesis block should have correct data");
 
-#[test]
-fn test_new_block() {
-    let data: Vec<u8> = b"block data".to_vec();
-    let prev_hash: [u8; 32] = [1u8; 32]; // Example previous hash for differentiation
+        // Create a new block with some data
+        let new_block_data: Vec<u8> = b"Some transactions".to_vec();
+        let new_block: Box<Block> = blockchain.create_block(new_block_data.clone());
+        
+        // Validate the new block's data
+        assert_eq!(new_block.data, new_block_data);
 
-    let block: Box<Block> = new_block(data.clone(), prev_hash);
-
-    // Since `new_block` uses `set_block_hash`, we assume the hash is set correctly and just validate the input and existence
-    assert_eq!(block.prev_hash, prev_hash);
-    assert_eq!(block.data, data);
-
-    // Validate the hash is not the default value, implying it was set
-    assert_ne!(block.hash, [0; 32], "Block hash should not be default value after creation");
+        // Validate the hash is not the default valuepending_transactions
+        assert_ne!(new_block.hash, [0; 32], "Block hash should not be default value after creation");
+    }
 }
