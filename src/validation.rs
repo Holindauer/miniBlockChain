@@ -87,18 +87,18 @@ async fn update_local_blockchain(blockchain: Arc<Mutex<BlockChain>>) {
     println!("Updating BlockChain State...\n");
 
     // Vector to store the collected blockchains
-    let mut collected_blockchains: Vec<BlockChain> = Vec::new();
+    let mut peer_blockchains: Vec<BlockChain> = Vec::new();
 
     // duration of listening for blockchain records
     let duration = Duration::from_secs(15); 
-    println!("Accepting blockchain records form peers for {} seconds...\n", duration.as_secs());
+    println!("Accepting blockchain records from peers for {} seconds...\n", duration.as_secs());
 
     // Collect blockchain records from peer validation nodes
     match collect_blockchain_records(duration).await {
-        Ok(collected_blockchains) => {
+        Ok(peer_blockchains) => {
 
             // If successful, determine the majority blockchain consensus
-            let majority_blockchain: Option<BlockChain> = determine_majority_blockchain(collected_blockchains);
+            let majority_blockchain: Option<BlockChain> = determine_majority_blockchain(peer_blockchains);
             if let Some(majority) = majority_blockchain {
 
                 // lock the blockchain and update it to the majority state
@@ -111,7 +111,11 @@ async fn update_local_blockchain(blockchain: Arc<Mutex<BlockChain>>) {
     }
 }
 
-
+/**
+ * @notice collect_blockchain_records() is an asynchronous function that listens for incoming connections on the specified
+ * port and collects blockchain records from peer validation nodes. This function is called by update_local_blockchain() and
+ * is not intended to be called directly.
+ */
 async fn collect_blockchain_records(duration: Duration) -> Result<Vec<BlockChain>, Box<dyn Error>> {
 
     // MPSC (multi-producer, single-consumer) channel to collect blockchain records between tasks
@@ -159,32 +163,37 @@ async fn collect_blockchain_records(duration: Duration) -> Result<Vec<BlockChain
     Ok(records)
 }
 
-// ! Placeholder function to hash blockchains and determine the majority
+
+/**
+ * @notice determine_majority_blockchain() is a function that takes a vector of blockchain records, takes
+ * the hash of each blockchain, and determines the majority blockchain based on the hash. 
+ * @dev This function is called directly after requesting blockchain records from peers when updating the local 
+ * blockchain to the majority state within update_local_blockchain().
+ */
 fn determine_majority_blockchain(blockchains: Vec<BlockChain>) -> Option<BlockChain> {
 
-    // HashMap to store the hash votes for each blockchain state  
-    let mut hash_votes: HashMap<String, i32> = HashMap::new();
+    // HashMap to store the hash votes
+    let mut hash_votes: HashMap<Vec<u8>, i32> = HashMap::new();
 
-    // Iterate over the received blockchains and hash each one
-    for blockchain in blockchains {
+    // Count the votes for each blockchain hash
+    for blockchain in &blockchains {
 
-        // Placeholder: Hash the blockchain.  // TODO: add this logic into the blockah=chain struct methods
-        let hash = hash_blockchain(&blockchain); // Placeholder for hashing logic
-
-        // Either increment the vote count for the hash or add it to the map
-        *hash_votes.entry(hash).or_insert(0) += 1;
+        // hash chain and either insert or increment vote count
+        let hash: Vec<u8> = blockchain.hash();
+        *hash_votes.entry(hash).or_insert(0) += 1; 
     }
 
-    // ! Placeholder: Find the hash with the majority voten
+    // Find the hash with the most votes
+    let majority_hash = hash_votes.into_iter()
+        .max_by_key(|&(_, count)| count)
+        .map(|(hash, _)| hash);
 
-    None // ! Placeholder return value
+    // If there's a majority hash, find and return the corresponding blockchain
+    majority_hash.and_then(|hash|
+        blockchains.into_iter().find(|blockchain| blockchain.hash() == hash)
+    )
 }
 
-// ! Placeholder for a function to hash a blockchain
-// This would implement the actual logic to generate a hash for a blockchain
-fn hash_blockchain(blockchain: &BlockChain) -> String {
-    "hash_placeholder".to_string()
-}
 
 
 /**
