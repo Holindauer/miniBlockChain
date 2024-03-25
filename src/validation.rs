@@ -1,4 +1,4 @@
-use tokio::sync::{Mutex, MutexGuard};
+use tokio::sync::{Mutex, MutexGuard, mpsc};
 use tokio::time;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
@@ -7,10 +7,12 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use std::error::Error;
 
 // Import the necessary libraries
 use crate::accounts::AccountCreationRequest;
 use crate::block::BlockChain;
+
 
 
 
@@ -52,12 +54,13 @@ const PORT_NUMBER: &str = "127.0.0.1:8080";
  * the network from the client side for running the validation process. 
  */
 pub fn run_validation(private_key: &String) {
+    println!("Booting Up Validator Node...\n");
 
     // Create a new Tokio runtime
     let rt = Runtime::new().unwrap();
 
     // Instatiating a new blockchain 
-    let blockchain = Arc::new(Mutex::new(BlockChain::new()));
+    let blockchain: Arc<Mutex<BlockChain>> = Arc::new(Mutex::new(BlockChain::new()));
 
     // Send request to peers to get the latest blockchain.
     rt.block_on(async {
@@ -81,42 +84,79 @@ pub fn run_validation(private_key: &String) {
  * as determined by the received blockchain records. This function is called by run_validation() and is not intended to be
  */
 async fn update_local_blockchain(blockchain: Arc<Mutex<BlockChain>>) {
+    println!("Updating BlockChain State...\n");
+
+    // Vector to store the collected blockchains
+    let mut collected_blockchains: Vec<BlockChain> = Vec::new();
+
+    // duration of listening for blockchain records
+    let duration = Duration::from_secs(15); 
+    println!("Accepting blockchain records form peers for {} seconds...\n", duration.as_secs());
 
     // Collect blockchain records from peer validation nodes
-    let collected_blockchains: Vec<BlockChain> = collect_blockchain_records(Duration::from_secs(60)).await;
+    match collect_blockchain_records(duration).await {
+        Ok(collected_blockchains) => {
 
-    // Determine the majority blockchain based on the collected records (could be None if no other nodes are online)
-    let majority_blockchain: Option<BlockChain> = determine_majority_blockchain(collected_blockchains);
+            // If successful, determine the majority blockchain consensus
+            let majority_blockchain: Option<BlockChain> = determine_majority_blockchain(collected_blockchains);
+            if let Some(majority) = majority_blockchain {
 
-    // Only update the local new instantiaon of the blockchain 
-    // if a majority blockchain was found to replace it
-    if let Some(majority) = majority_blockchain {
-
-        // await async tokio mutex lock
-        let mut bc: MutexGuard<'_, BlockChain> = blockchain.lock().await;
-
-        // update the blockchain once the mutex is locked
-        *bc = majority;
-        println!("Blockchain updated to majority state.");
+                // lock the blockchain and update it to the majority state
+                let mut bc: MutexGuard<'_, BlockChain> = blockchain.lock().await; 
+                *bc = majority;
+                println!("Blockchain updated to majority state.");
+            }
+        },
+        Err(e) => println!("Error collecting blockchain records: {}", e),
     }
 }
 
 
-//  ! Placeholder
-async fn collect_blockchain_records(duration: Duration) -> Vec<BlockChain> {
+async fn collect_blockchain_records(duration: Duration) -> Result<Vec<BlockChain>, Box<dyn Error>> {
 
-    // Vector to store received blockchain records
+    // MPSC (multi-producer, single-consumer) channel to collect blockchain records between tasks
+    let (tx, mut rx) = mpsc::channel(32); 
+
+    // Create a new listener on the specified port
+    let listener = TcpListener::bind(PORT_NUMBER).await?;
+    let end_time = time::Instant::now() + duration; // end time for listening
+
+    // Spawn a new task to listen for incoming connections
+    tokio::spawn(async move {
+        while time::Instant::now() < end_time { // loop until time is up
+
+            tokio::select! {
+
+                // Break if time is up
+                _ = time::sleep_until(end_time) => { break; }
+
+                // Accept incoming connections
+                Ok((mut socket, _)) = listener.accept() => {
+                    
+                    // Clone the sender to send the blockchain records to the channel
+                    let tx_clone = tx.clone();
+                    tokio::spawn(async move {
+
+                        // Read blockchain data into buffer, convert to blockchain struct, and send to channel
+                        let mut buffer = Vec::new();
+                        if socket.read_to_end(&mut buffer).await.is_ok() {
+                            if let Ok(blockchain) = serde_json::from_slice::<BlockChain>(&buffer) {  // deserialize into blockhain struct
+                                let _ = tx_clone.send(blockchain).await; // Handle error as needed
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    });
+
+    // Collect records from the channel
     let mut records: Vec<BlockChain> = Vec::new();
+    while let Some(blockchain) = rx.recv().await {
+        records.push(blockchain);
+    }
 
-    // TODO: Currently a Placeholder: Needs to Populate `records` with received blockchains
-    // TODO: from listening on a TCP socket. Records should be received as JSON, and deserialized
-    // TODO: into BlockChain structs and returned for the next step, determine_majority_blockchain()
-    // TODO: which is called within update_local_blockchain()
-
-    // Simulate waiting for incoming records for a fixed duration
-    time::sleep(duration).await;
-
-    records
+    Ok(records)
 }
 
 // ! Placeholder function to hash blockchains and determine the majority
