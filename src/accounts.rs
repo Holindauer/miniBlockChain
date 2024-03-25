@@ -57,7 +57,7 @@ async fn send_account_creation_msg() -> tokio::io::Result<()> {
     };
 
     // Sending the message to a specific address or broadcast it
-    send_network_msg("127.0.0.1:8080", message).await
+    send_network_msg(PORT_NUMBER, message).await
 }
 
 

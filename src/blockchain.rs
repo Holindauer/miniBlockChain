@@ -1,8 +1,7 @@
 use sha2::{Sha256, Digest};
 use std::collections::VecDeque;
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::{fs::File, io::{self, Read, Write}, path::Path};
-use serde_json::json;
+use std::{fs::File, io::{self, Read}, path::Path};
 use serde::{Serialize, Deserialize};
 
 // block.rs contains structs and functions for fascilitating the creation and 
@@ -59,6 +58,7 @@ impl BlockChain {
 
     // Initialize a new blockchain with a genesis block
     pub fn new() -> Self {
+        println!("Intializing Empty BlockChain...\n");
 
         // Create a new blockchain 
         let mut blockchain: BlockChain = BlockChain {
@@ -151,6 +151,23 @@ impl BlockChain {
         let file = File::create("BlockChain.json")?;
         serde_json::to_writer_pretty(file, &self.chain)?;
         Ok(())
+    }
+
+    /// Hashes the entire blockchain using SHA-256.
+    pub fn hash(&self) -> Vec<u8> {
+
+        // Create a new SHA256 hasher
+        let mut hasher = Sha256::new();
+
+        // Push each block's data to the hasher
+        for block in &self.chain {
+            hasher.update(block.timestamp.to_string().as_bytes());
+            hasher.update(&block.prev_hash);
+            hasher.update(&block.data);
+        }
+
+        // Finalize the hash and return it
+        hasher.finalize().to_vec()
     }
 }
 

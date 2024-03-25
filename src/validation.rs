@@ -1,17 +1,16 @@
 use tokio::sync::{Mutex, MutexGuard, mpsc};
 use tokio::time;
-use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener};
+use tokio::io::{AsyncReadExt};
 use tokio::runtime::Runtime;
-use serde_json::{Value, json};
+use serde_json::{Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use std::error::Error;
 
 // Import the necessary libraries
-use crate::accounts::AccountCreationRequest;
-use crate::block::BlockChain;
+use crate::blockchain::BlockChain;
 
 
 
@@ -194,8 +193,6 @@ fn determine_majority_blockchain(blockchains: Vec<BlockChain>) -> Option<BlockCh
     )
 }
 
-
-
 /**
  * @notice listen_for_connections()S is an asynchronous function that listens for incoming connections on the
  * specified address. It will spawn new tasks to handle each incoming connection. This function serves as the 
@@ -254,8 +251,6 @@ pub async fn listen_for_connections(address: &str) -> tokio::io::Result<()> {
 
 // ! Placeholder: Implement your actual verification logic here
 async fn verify_account_creation(request: Value) -> Result<(), String> {
-    
-
     println!("Account creation verified for public key: {}", request["public_key"].as_str().unwrap_or_default());
     Ok(())
 }

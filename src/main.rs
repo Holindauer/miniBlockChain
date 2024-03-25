@@ -1,11 +1,10 @@
-use std::thread;
-use tokio::runtime::Runtime;
 use std::env;
 
 mod accounts;
-mod block;
+mod blockchain;
 mod transactions;
 mod validation;
+mod merkleTree;
 
 /**
  * @notice main.rs runs a blockchain node which connects to a TCP server in order to interact with the blockchain. 
