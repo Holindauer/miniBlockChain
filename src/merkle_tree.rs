@@ -5,7 +5,6 @@ use std::fs::File;
 use std::io::{Read, Write};
 use hex;
 
-
 /**
  * @notice merkleTree.rs contains an implementation of a merkle tree for the purpose of retrieval of 
  * account balances from public keys. As well as for the validation of transactions and new blocks 
@@ -18,6 +17,7 @@ use hex;
  * to the blockchain.
  */
 
+ 
 /**
  * @notice Account struct represents a single account in the blockchain.
  * @param public_key - the public key of the account as a vector of bytes.
@@ -25,10 +25,10 @@ use hex;
  * @param nonce - the nonce of the account (amount of transactions sent from this account).
  */
 #[derive(Debug, Clone)]
-struct Account {
-    public_key: Vec<u8>,
-    balance: u64,
-    nonce: u64,
+pub struct Account {
+    pub public_key: Vec<u8>,
+    pub balance: u64,
+    pub nonce: u64,
 }
 
 /**
@@ -48,7 +48,7 @@ enum MerkleNode {
  * @param accountsMap - a hash map of account balances indexed by public key.
  */
 #[derive(Debug, Clone)]
-struct MerkleTree {
+pub struct MerkleTree {
     root: Option<MerkleNode>,
     accountsVec: Vec<Account>,
     accountsMap: HashMap<Vec<u8>, u64>,
@@ -66,16 +66,21 @@ impl MerkleTree {
     }
 
     // Hashes an Account struct and inserts into accountsMap HashMap
-    fn add_account(&mut self, account: Account) {
+    pub fn insert_account(&mut self, account: Account) {
         self.accountsVec.push(account.clone());    // accou
         self.accountsMap.insert(account.public_key.clone(), account.balance); // Use public key as key and balance as value
     }
 
     // Retrieves account balance from accountsMap public key
-    fn retrieve_account_balance(&self, public_key: Vec<u8>) -> Option<u64> {
+    pub fn retrieve_account_balance(&self, public_key: Vec<u8>) -> Option<u64> {
         self.accountsMap.get(&public_key).cloned()
     }
     
+    // Checks if an account exists
+    pub fn account_exists(&self, public_key: Vec<u8>) -> bool {
+        self.accountsMap.contains_key(&public_key)
+    }
+
     /**
      * @notice generate_merkle_root() is a method that generates the root hash of the merkle tree. It is called during the consensus 
      * process to validate new blocks being written to the blockchain. The method transforms accounts into leaf nodes and hashes them 
@@ -188,7 +193,7 @@ impl MerkleTree {
         self.clear();
 
         // Extract the final hash and accounts from the JSON object, populating the Merkle tree
-        let final_hash = hex::decode(parsed["final_hash"].as_str().unwrap()).unwrap();
+        let final_hash = hex::decode(parsed["final_hash"].as_str().unwrap()).unwrap();  // TODO potentially check if this matches the root hash when computed from loaded accounts
         let accounts_json = parsed["accounts"].as_array().unwrap();
 
         // Set the root node to the final hash
@@ -200,7 +205,7 @@ impl MerkleTree {
             let nonce = account["nonce"].as_u64().unwrap();
 
             // Add the account to the Merkle tree
-            self.add_account(Account { public_key, balance, nonce });
+            self.insert_account(Account { public_key, balance, nonce });
         }
 
         Ok(())
@@ -219,17 +224,17 @@ mod tests {
     use super::*;
     
     /**
-     * @test test_add_account() is a test function that checks the add_account() method of the MerkleTree struct.
+     * @test test_insert_account() is a test function that checks the insert_account() method of the MerkleTree struct.
      */
     #[test]
-    fn test_add_account() {
+    fn test_insert_account() {
         let mut tree = MerkleTree::new(); // create a new MerkleTree instance
         let account = Account { // create a new Account instance w/ mock data
             public_key: vec![1, 2, 3, 4],
             balance: 100,
             nonce: 1,
         };
-        tree.add_account(account.clone());
+        tree.insert_account(account.clone());
         
         // ensure the account was added to the tree correctly
         assert_eq!(tree.accountsVec.len(), 1);
@@ -248,7 +253,7 @@ mod tests {
             balance: 100,
             nonce: 1,
         };
-        tree.add_account(account.clone());  // add the account to the tree
+        tree.insert_account(account.clone());  // add the account to the tree
 
         // ensure the account balance can be retrieved correctly
         let balance = tree.retrieve_account_balance(account.public_key.clone()).unwrap();
@@ -268,7 +273,7 @@ mod tests {
         };  
 
         // add the account to the tree and generate the merkle root
-        tree.add_account(account);
+        tree.insert_account(account);
         tree.generate_merkle_root();
 
         // ensure root node hash exists and has the correct length
@@ -278,6 +283,20 @@ mod tests {
         } else {
             panic!("Root should be a leaf node");
         }
+    }
+
+    #[test]
+    fn test_account_exists(){
+
+        let mut tree = MerkleTree::new();
+        let account = Account {
+            public_key: vec![1, 2, 3, 4],
+            balance: 100,
+            nonce: 1,
+        };
+
+        tree.insert_account(account.clone());
+        assert!(tree.account_exists(account.public_key.clone()));
     }
 
     #[test]
@@ -293,7 +312,7 @@ mod tests {
         for i in 0..25 {
             let mut account = account1.clone();
             account.balance += i;
-            tree.add_account(account);
+            tree.insert_account(account);
         }
 
         // generate the merkle root

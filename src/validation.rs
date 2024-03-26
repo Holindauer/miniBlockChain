@@ -178,7 +178,7 @@ fn determine_majority_blockchain(blockchains: Vec<BlockChain>) -> Option<BlockCh
     for blockchain in &blockchains {
 
         // hash chain and either insert or increment vote count
-        let hash: Vec<u8> = blockchain.hash();
+        let hash: Vec<u8> = blockchain.hash_blockchain();
         *hash_votes.entry(hash).or_insert(0) += 1; 
     }
 
@@ -189,7 +189,7 @@ fn determine_majority_blockchain(blockchains: Vec<BlockChain>) -> Option<BlockCh
 
     // If there's a majority hash, find and return the corresponding blockchain
     majority_hash.and_then(|hash|
-        blockchains.into_iter().find(|blockchain| blockchain.hash() == hash)
+        blockchains.into_iter().find(|blockchain| blockchain.hash_blockchain() == hash)
     )
 }
 

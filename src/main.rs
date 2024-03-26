@@ -4,7 +4,7 @@ mod accounts;
 mod blockchain;
 mod transactions;
 mod validation;
-mod merkleTree;
+mod merkle_tree;
 
 /**
  * @notice main.rs runs a blockchain node which connects to a TCP server in order to interact with the blockchain. 
