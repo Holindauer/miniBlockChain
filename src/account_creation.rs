@@ -10,7 +10,20 @@ extern crate rand;
 use secp256k1::{Secp256k1, SecretKey, PublicKey};
 use rand::{thread_rng, RngCore}; // Ensure thread_rng is imported here
 
-const PORT_NUMBER: &str = "127.0.0.1:8080";
+
+
+
+/**
+ * @notice account_creation.rs contains the logic for sending a request to the network to create a new account.
+ * This is done by generating a new keypair using the secp256k1 elliptic curve, then sending the public key to
+ * the network. Validtors will receive this message and update their merkle tree to include the new account.
+ * 
+ * The account_creation() function is called from main.rs when the user runs the node software with the [make]
+*/
+
+
+
+const PORT_NUMBER: &str = "127.0.0.1:8080"; // TODO figure out how to link thi between src files
 
 /**
  * @notice KeyPair encapsulate a new private and public key generated for a new 
@@ -20,7 +33,6 @@ const PORT_NUMBER: &str = "127.0.0.1:8080";
 pub struct AccountCreationRequest {
     pub action: String,
     pub public_key: String,
-    // TODO - other data
 }
 
 /**
@@ -32,20 +44,24 @@ pub fn account_creation() {
     // Create a new Tokio runtime 
     let rt = tokio::runtime::Runtime::new().unwrap();
 
-    // Use the runtime to block_on  the account creation process (run an async process in a synchronous 
-    // context). Output from send_account creation_msg() is a future that will resolve to a Result type.   
+    // block_on the account creation process, display the results   
     match rt.block_on(send_account_creation_msg()) { 
+        Ok(keys) => {
+            println!("Account sucessfully created. \n\nSecret Key: {:?}, \nPublic Key: {:?}", keys.0.to_string(), keys.1.to_string());
+        },
+        Err(e) => { eprintln!("Account creation failed: {}", e); return; },
+    };
 
-        Ok(_) => println!("Account creation process initiated successfully."),
-        Err(e) => eprintln!("Account creation failed: {}", e),
-    }
 }
 
 /**
  * @notice send_account_creation_msg() asynchonously creates and packages a new keypair. Then sends
  * uses tohe send_network_msg() func to distribute it to other nodes in the network.
+ * @return a tuple of the secret and public key generated for the new account.
  */
-async fn send_account_creation_msg() -> tokio::io::Result<()> {
+async fn send_account_creation_msg() -> Result<(SecretKey, PublicKey), io::Error> {
+    println!("Sending account creation message to network...");
+
 
     // Generate a new keypair
     let (secret_key, public_key) = generate_keypair()?;
@@ -56,27 +72,17 @@ async fn send_account_creation_msg() -> tokio::io::Result<()> {
         public_key: public_key.to_string(),
     };
 
-    // Sending the message to a specific address or broadcast it
-    send_network_msg(PORT_NUMBER, message).await
-}
+    // Connect to the server at the specified port number
+    let mut stream: TcpStream = TcpStream::connect(PORT_NUMBER).await?;
 
-
-/**
- * @notice send_network_msg() asynchronously sends the generated 
- */
-async fn send_network_msg(addr: &str, message: AccountCreationRequest) -> tokio::io::Result<()> {
-
-    // Connect to the server
-    let mut stream: TcpStream = TcpStream::connect(addr).await?;
-
-    // Serialize the message to JSON
+    // Serialize message to JSON, write to stream
     let message_json: String = serde_json::to_string(&message)?;
-
-    // Write the message to the server
     stream.write_all(message_json.as_bytes()).await?;
 
-    Ok(())
+    // Return the generated secret key and public key
+    Ok((secret_key, public_key))
 }
+
 
 /**
  * @notice generate_keypair() applies the sepc256k1 eliptic curve to generate a new private 
