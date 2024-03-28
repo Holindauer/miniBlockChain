@@ -4,7 +4,7 @@ use validation::run_validation;
 
 mod account_creation;
 mod blockchain;
-mod transactions;
+mod send_transaction;
 mod validation;
 mod merkle_tree;
 
@@ -76,14 +76,14 @@ fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
 
     // Account Creation Specified  
-    if args.len() == 2 && args[1] == "make" { 
+    if args[1] == "make" && args.len() == 2  { 
 
         // validate account creation
         account_creation::account_creation();
         return Ok(());
 
     } // Transaction Specified
-    else if args.len() == 5 && args[1] == "trasaction"{ 
+    else if args[1] == "transaction" && args.len() == 5 {  
 
         // extract provided arguments:
         let private_key = &args[2];
@@ -91,7 +91,7 @@ fn main() -> std::io::Result<()> {
         let transaction_amount = &args[4];
 
         // validate transaction 
-        transactions::send_transaction(private_key, recipient, transaction_amount);
+        send_transaction::send_transaction(private_key, recipient, transaction_amount);
 
     }// Validation Specified 
     else if args.len() == 3 && args[1] == "validate" { 

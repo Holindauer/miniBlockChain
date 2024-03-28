@@ -40,13 +40,12 @@ pub fn account_creation() {
     let rt = tokio::runtime::Runtime::new().unwrap();
 
     // block_on the account creation process, display the results   
-    match rt.block_on(send_account_creation_msg()) { 
+    match rt.block_on(send_account_creation_request()) { 
         Ok(keys) => {
             println!("Account detials sucessfully created: \n\nSecret Key: {:?}, \nPublic Key: {:?}", keys.0.to_string(), keys.1.to_string());
         },
         Err(e) => { eprintln!("Account creation failed: {}", e); return; },
     };
-
 }
 
 /**
@@ -54,14 +53,14 @@ pub fn account_creation() {
  * uses tohe send_network_msg() func to distribute it to other nodes in the network.
  * @return a tuple of the secret and public key generated for the new account.
  */
-async fn send_account_creation_msg() -> Result<(SecretKey, PublicKey), io::Error> {
+async fn send_account_creation_request() -> Result<(SecretKey, PublicKey), io::Error> {
     println!("\nSending account creation message to network...");
 
     // Generate a new keypair
     let (secret_key, public_key) = generate_keypair()?;
 
-    // example msg of account creation
-    let message: AccountCreationRequest = AccountCreationRequest {
+    // package account creation request
+    let request: AccountCreationRequest = AccountCreationRequest {
         action: "make".to_string(),
         public_key: public_key.to_string(),
     };
@@ -69,9 +68,9 @@ async fn send_account_creation_msg() -> Result<(SecretKey, PublicKey), io::Error
     // Connect to the server at the specified port number
     let mut stream: TcpStream = TcpStream::connect(PORT_NUMBER).await?;
 
-    // Serialize message to JSON, write to stream
-    let message_json: String = serde_json::to_string(&message)?;
-    stream.write_all(message_json.as_bytes()).await?;
+    // Serialize request to JSON, write to stream
+    let request_json: String = serde_json::to_string(&request)?;
+    stream.write_all(request_json.as_bytes()).await?;
 
     // Return the generated secret key and public key
     Ok((secret_key, public_key))

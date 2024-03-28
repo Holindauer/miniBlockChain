@@ -79,7 +79,7 @@ impl ValidatorNode {
  * @notice run_validation() is a wrapper called within main.rs that instigates the process of accessing
  * the network from the client side for running the validation process. 
  */
-pub fn run_validation(private_key: &String) { // ! TDOO implemnt private key/staking idea
+pub fn run_validation(private_key: &String) { // ! TDOO implemnt private key/staking idea. Private key to send tokens to
     println!("Booting Up Validator Node...\n");
 
     // init mutable validator node struct and run validation
@@ -266,9 +266,7 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
         // Handle Request to Make New Account
         if request["action"] == "make" { 
 
-            let cloned_blockchain = blockchain.clone();
-
-            match verify_account_creation(request, merkle_tree, cloned_blockchain).await {
+            match verify_account_creation(request, merkle_tree, blockchain.clone()).await {
                 Ok(public_key) => {
                     println!("Account creation verified for public key: {}", public_key);
                     print_chain(blockchain).await; // Pass the original blockchain variable
@@ -277,9 +275,31 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
             }
         } 
 
-
         // Handle Request to Make New Transaction
-        else if request["action"] == "transaction" { println!("TODO implement transaction validation"); } // ! <---- TODO  Implement
+        else if request["action"] == "transaction" { 
+                
+
+                let mut success: bool = false;
+
+                match verify_transaction(request, merkle_tree, blockchain.clone()).await {
+                    Ok(_success) => {success = _success;},
+                    Err(e) => {eprintln!("Transaction Validation Error: {}", e);}
+                }
+
+
+
+                if success {
+                    println!("Transaction verified and added to blockchain");
+                    print_chain(blockchain).await; // Pass the original blockchain variable
+                } else {
+                    eprintln!("Transaction failed to verify");
+                }
+
+        } 
+
+
+
+
         else { eprintln!("Unrecognized action: {}", request["action"]);}
     } else {eprintln!("Failed to parse message: {}", msg);}
 }
@@ -340,4 +360,10 @@ async fn print_chain(blockchain: Arc<Mutex<BlockChain>>) {
     for (i, block) in blockchain_guard.chain.iter().enumerate() {
         println!("\nBlock {}: {:?}", i, block);
     }
+}
+
+
+async fn verify_transaction(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<bool, String> {
+
+    Ok(true)
 }
