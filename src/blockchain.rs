@@ -4,6 +4,8 @@ use std::collections::{HashMap, VecDeque};
 use std::{fs::File, io::{self, Read}, path::Path};
 use serde::{Serialize, Deserialize};
 
+
+
 use crate::merkle_tree::{MerkleTree, Account};
 
 
@@ -33,7 +35,7 @@ use crate::merkle_tree::{MerkleTree, Account};
  * @param recipientAdress - the address of the recipient.
  * @param amount - the amount of the transaction.
 */  
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Request {
     Transaction {
         sender_address: Vec<u8>,
@@ -47,6 +49,24 @@ pub enum Request {
         time: u64,
     }
 }
+
+// impl PartialEq for Request {
+//     fn eq(&self, other: &Self) -> bool { // Implementing PartialEq for Request Structs 
+//         match (self, other) {
+//             // Compare each field for both type of Request
+//             (Request::Transaction { sender_address: a1, sender_nonce: n1, recipient_address: r1, amount: am1, time: t1 },
+//              Request::Transaction { sender_address: a2, sender_nonce: n2, recipient_address: r2, amount: am2, time: t2 }) => {
+//                 a1 == a2 && n1 == n2 && r1 == r2 && am1 == am2 && t1 == t2
+//             },
+//             (Request::NewAccount { new_address: a1, time: t1 },
+//              Request::NewAccount { new_address: a2, time: t2 }) => {
+//                 a1 == a2 && t1 == t2
+//             },
+            
+//             _ => false,
+//         }
+//     }
+// }
 
  /**
   * @notice Block is an enum that represents the different types of blocks that can be added to the blockchain.
@@ -137,27 +157,53 @@ impl BlockChain {
     // Method to create a new block from a request and add it to the blockchain
     pub fn push_request_to_chain(&mut self, request: Request) {
         println!("Pushing request to blockchain...\n");
-
+    
+        let address: Vec<u8>; 
+    
         // Create Block from request
-        let block: Block = match request {
-
+        let block: Block = match &request { // Borrow `request` here instead of moving it
             // package transaction block
             Request::Transaction { sender_address, recipient_address, amount, time, sender_nonce } => {
                 let hash: Vec<u8> = Vec::new();
-                Block::Transaction { sender: sender_address, recipient: recipient_address, amount: amount as u64, time, sender_nonce, hash }
-            },
+                address = sender_address.clone(); // Clone the address here for later use
 
+                // return the new transaction block
+                Block::Transaction {
+                    sender: sender_address.clone(), 
+                    recipient: recipient_address.clone(), 
+                    amount: *amount as u64,  // * dereferences the amount to get the value
+                    time: *time, 
+                    sender_nonce: *sender_nonce, 
+                    hash 
+                }
+            },
+    
             // package new account block
             Request::NewAccount { new_address, time } => {
                 let hash: Vec<u8> = Vec::new();
-                Block::NewAccount { address: new_address, time, hash }
+                address = new_address.clone(); // Clone the address here for later use
+                Block::NewAccount { address: new_address.clone(), time: *time, hash }
             },
         };
-
+    
         println!("Block created...\n");
-
+    
         // Push the new block to the blockchain
-        self.chain.push(block.clone());
+        self.chain.push(block);
+    
+        // Assuming the address for the pending request queue and joint request map is the same as used in creating the block
+        self.pending_request_queue.pop_front();
+    
+        // Now you can use the address variable here without issue
+
+        // retrieve mutable vector of all requests from the sender
+        if let Some(requests) = self.joint_request_map.get_mut(&address) {
+
+            // Remove the request from the vector that matches the one added to the blockchain
+            if let Some(index) = requests.iter().position(|r| *r == request) {
+                requests.remove(index); 
+            }
+        }
     }
 
     // Validates all transactions related to a single sender
