@@ -73,7 +73,7 @@ pub enum Request {
   * @dev The Block enum is used to store the data of the block and differentiate between the different types of blocks.
 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
-enum Block {
+pub enum Block {
     Genesis { time : u64},
     Transaction { sender: Vec<u8>, recipient: Vec<u8>, amount: u64, time : u64, sender_nonce: u64, hash: Vec<u8>},
     NewAccount { address: Vec<u8>, time: u64, hash: Vec<u8>},
@@ -91,7 +91,7 @@ enum Block {
 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockChain {
-    chain: Vec<Block>,                                         
+    pub chain: Vec<Block>,                                         
     pending_request_queue: VecDeque<Vec<u8>>,          // queue of public keys
     joint_request_map: HashMap<Vec<u8>, Vec<Request>>, // map of public keys to transactions
 }
@@ -161,7 +161,7 @@ impl BlockChain {
         let address: Vec<u8>; 
     
         // Create Block from request
-        let block: Block = match &request { // Borrow `request` here instead of moving it
+        let mut block: Block = match &request { // Borrow `request` here instead of moving it
             // package transaction block
             Request::Transaction { sender_address, recipient_address, amount, time, sender_nonce } => {
                 let hash: Vec<u8> = Vec::new();
@@ -185,7 +185,10 @@ impl BlockChain {
                 Block::NewAccount { address: new_address.clone(), time: *time, hash }
             },
         };
-    
+
+        // Hash the block data
+        self.hash_block_data(&mut block);
+        
         println!("Block created...\n");
     
         // Push the new block to the blockchain
@@ -211,14 +214,11 @@ impl BlockChain {
         println!("Function Stub for validate_transaction() called.");
     }
 
-    // Populates empty block data hash vector w/ the hash of all data in a block
-    fn hash_block_data(&mut self, block: &mut Block) {  
-
-        // Create a new SHA256 hasher
-        let mut hasher = Sha256::new();
-        
-        // Add the block's data to the hasher based on its type
-        match block {
+    // Sets the hash of a block based on its data
+    fn hash_block_data(&mut self, block: &mut Block) {
+        let mut hasher = Sha256::new(); // new SHA256 hasher
+    
+        match block { // Contribute block to hasher based on its type
             Block::Genesis { time, .. } => {
                 hasher.update(time.to_string().as_bytes());
             }
@@ -234,13 +234,17 @@ impl BlockChain {
                 hasher.update(time.to_string().as_bytes());
             }
         }
-    
-        // Update the block's hash field with the finalized hash
+        
+        // Finalize the hash and return it as Vec<u8>
+        let hash = hasher.finalize().to_vec();
+        
+        // Set the hash in the block
         match block {
-            Block::Transaction { hash, .. } => { *hash = hasher.finalize().to_vec().clone(); }
-            Block::NewAccount { hash, .. } => { *hash = hasher.finalize().to_vec().clone(); }
-            _ => {}
-        }
+            Block::Transaction { hash: block_hash, .. } | Block::NewAccount { hash: block_hash, .. } => {
+                *block_hash = hash.clone();
+            }
+            _ => (),
+        }    
     }
     
     /// Hashes the entire blockchain using SHA-256.

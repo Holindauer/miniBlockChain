@@ -265,8 +265,14 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
             
         // Handle Request to Make New Account
         if request["action"] == "make" { 
-            match verify_account_creation(request, merkle_tree, blockchain).await {
-                Ok(public_key) => {println!("Account creation verified for public key: {}", public_key);},
+
+            let cloned_blockchain = blockchain.clone();
+
+            match verify_account_creation(request, merkle_tree, cloned_blockchain).await {
+                Ok(public_key) => {
+                    println!("Account creation verified for public key: {}", public_key);
+                    print_chain(blockchain).await; // Pass the original blockchain variable
+                },
                 Err(e) => {eprintln!("Account creation Invalid: {}", e);}
             }
         } 
@@ -325,4 +331,13 @@ async fn verify_account_creation(request: Value, merkle_tree: Arc<Mutex<MerkleTr
 }
 
 
+// Helper for printing the chain
+async fn print_chain(blockchain: Arc<Mutex<BlockChain>>) {
+    let blockchain_guard = blockchain.lock().await;
 
+    // retrieve the chain field and print each block using enumerate in a n itemized list
+    println!("Current State of Blockchain as Maintained on Client Side:");
+    for (i, block) in blockchain_guard.chain.iter().enumerate() {
+        println!("\nBlock {}: {:?}", i, block);
+    }
+}
