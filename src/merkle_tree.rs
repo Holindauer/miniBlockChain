@@ -72,8 +72,13 @@ impl MerkleTree {
     }
 
     // Retrieves account balance from accountsMap public key
-    pub fn retrieve_account_balance(&self, public_key: Vec<u8>) -> Option<u64> {
+    pub fn account_balance(&self, public_key: Vec<u8>) -> Option<u64> {
         self.accountsMap.get(&public_key).cloned()
+    }
+
+    // Returns Account struct of a specific public key
+    pub fn get_account(&self, public_key: Vec<u8>) -> Option<Account> {
+        self.accountsVec.iter().find(|account| account.public_key == public_key).cloned()
     }
     
     // Checks if an account exists
@@ -256,7 +261,7 @@ mod tests {
         tree.insert_account(account.clone());  // add the account to the tree
 
         // ensure the account balance can be retrieved correctly
-        let balance = tree.retrieve_account_balance(account.public_key.clone()).unwrap();
+        let balance = tree.account_balance(account.public_key.clone()).unwrap();
         assert_eq!(balance, account.balance);
     }
 
