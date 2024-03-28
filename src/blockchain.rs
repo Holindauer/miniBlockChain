@@ -24,28 +24,17 @@ use crate::merkle_tree::{MerkleTree, Account};
  *   the public key of the new account, the timestamp of the account creation, and the hash of this block data.
  */
 
- /**
-  * @notice Block is an enum that represents the different types of blocks that can be added to the blockchain.
-  * @dev The Block enum is used to store the data of the block and differentiate between the different types of blocks.
-*/
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum Block {
-    Genesis { time : u64},
-    Transaction { sender: [u8; 20], recipient: [u8; 20], amount: u64, time : u64, hash: Vec<u8>},
-    AccountCreation { address: [u8; 20], time: u64, hash: Vec<u8>},
-}
 
 /**
- * @notice TransactionRequest structs contain information about a single transpassing information 
- * to the blockchain.
- * @dev account addresses are stored as arrays of 20 bytes.
+ * @notice TransactionRequest structs packages information about a single request to write information to the blockchain.
+ * @dev The two types of writing requests are: Transaction and NewAccount.
  * @param senderAdress - the Blockchainaddress of the sender.
  * @param senderNonce - the nonce of the sender. (num transactions sender has made).
  * @param recipientAdress - the address of the recipient.
  * @param amount - the amount of the transaction.
 */  
 #[derive(Debug, Clone, Serialize, Deserialize)]
-enum Request {
+pub enum Request {
     Transaction {
         sender_address: Vec<u8>,
         sender_nonce: u64,
@@ -53,12 +42,22 @@ enum Request {
         amount: f32,
         time: u64,
     }, 
-    AccountCreation {
+    NewAccount {
         new_address: Vec<u8>,
         time: u64,
     }
 }
 
+ /**
+  * @notice Block is an enum that represents the different types of blocks that can be added to the blockchain.
+  * @dev The Block enum is used to store the data of the block and differentiate between the different types of blocks.
+*/
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum Block {
+    Genesis { time : u64},
+    Transaction { sender: Vec<u8>, recipient: Vec<u8>, amount: u64, time : u64, sender_nonce: u64, hash: Vec<u8>},
+    NewAccount { address: Vec<u8>, time: u64, hash: Vec<u8>},
+}
 
 /**
  * @notice the Blockchain struct links Blocks int a linked list.
@@ -73,7 +72,7 @@ enum Request {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockChain {
     chain: Vec<Block>,                                         
-    pending_request_queue: VecDeque<Vec<u8>>,                     // queue of public keys
+    pending_request_queue: VecDeque<Vec<u8>>,          // queue of public keys
     joint_request_map: HashMap<Vec<u8>, Vec<Request>>, // map of public keys to transactions
 }
 
@@ -116,12 +115,13 @@ impl BlockChain {
      * @dev the sender's address is pushed to the pending_transactions_queue and the transaction is
      * added to the joint_transactions_map, using the sender's address as the key.
      */
-    pub fn store_incoming_requests(&mut self, request: Request) {
+    pub fn store_incoming_requests(&mut self, request: &Request) {
+        println!("Incoming request stored in blockchain pending requests queue...\n");
 
         // Retrieve and clone relavant address from the request
         let address: Vec<u8> = match &request {
             Request::Transaction { sender_address, .. } => sender_address,
-            Request::AccountCreation { new_address, .. } => new_address,
+            Request::NewAccount { new_address, .. } => new_address,
         }.clone();
     
         // Push the address to the pending request queue
@@ -130,77 +130,39 @@ impl BlockChain {
         // Insert the request into the joint_request_map, creating a new entry if necessary
         self.joint_request_map.entry(address)
             .or_insert_with(Vec::new)
-            .push(request);
+            .push(request.clone());
     }
 
-    /**
-     * @notice validate_account_creation() validates a single account creation request within the blockchain 
-     * and adds the account to the merkle tree
-     */
-    pub fn validate_account_creation(&mut self, request: Request, merkle_tree: &mut MerkleTree) {
-
-        // retrieve public key
-        let public_key: Vec<u8> = match &request {
-            Request::AccountCreation { new_address, .. } => new_address.clone(),
-            _ => panic!("Invalid request type for account creation validation."),
-        };
-
-        // check if account already exists in merkle tree
-        if merkle_tree.account_exists(public_key.clone()){
-            println!("Invalid! Account already exists in the Merkle Tree.");
-            return;
-        }
-
-        // Package account data in Account struct
-        let new_account: Account = Account {
-            public_key: public_key.clone(),
-            balance: 0,
-            nonce: 0,
-        };
-
-        // Insert the new account into the merkle tree and push the request to the chain
-        merkle_tree.insert_account(new_account);
-        self.push_request_to_chain(request);
-        
-
-
-    }
-
-
-    // Validates all transactions related to a single sender
-    pub fn validate_transaction(&mut self, request: Request, merkle_tree: &mut MerkleTree) {    
-        println!("Function Stub for validate_transaction() called.");
-    }
 
     // Method to create a new block from a request and add it to the blockchain
-    fn push_request_to_chain(&mut self, request: Request) {
+    pub fn push_request_to_chain(&mut self, request: Request) {
+        println!("Pushing request to blockchain...\n");
 
         // Create Block from request
         let block: Block = match request {
 
             // package transaction block
-            Request::Transaction { sender_address, recipient_address, amount,  time, sender_nonce} => {
-                Block::Transaction { 
-                    sender: sender_address.try_into().unwrap(), 
-                    recipient: recipient_address.try_into().unwrap(), 
-                    amount: amount as u64, 
-                    time: time, 
-                    hash: Vec::new()
-                }
-            }
+            Request::Transaction { sender_address, recipient_address, amount, time, sender_nonce } => {
+                let hash: Vec<u8> = Vec::new();
+                Block::Transaction { sender: sender_address, recipient: recipient_address, amount: amount as u64, time, sender_nonce, hash }
+            },
 
-            // package account creation block
-            Request::AccountCreation { new_address, time } => {
-                Block::AccountCreation { 
-                    address: new_address.try_into().unwrap(), 
-                    time: time, 
-                    hash: Vec::new()
-                }
-            }
+            // package new account block
+            Request::NewAccount { new_address, time } => {
+                let hash: Vec<u8> = Vec::new();
+                Block::NewAccount { address: new_address, time, hash }
+            },
         };
+
+        println!("Block created...\n");
 
         // Push the new block to the blockchain
         self.chain.push(block.clone());
+    }
+
+    // Validates all transactions related to a single sender
+    pub fn validate_transaction(&mut self, request: Request, merkle_tree: &mut MerkleTree) {    
+        println!("Function Stub for validate_transaction() called.");
     }
 
     // Populates empty block data hash vector w/ the hash of all data in a block
@@ -214,13 +176,14 @@ impl BlockChain {
             Block::Genesis { time, .. } => {
                 hasher.update(time.to_string().as_bytes());
             }
-            Block::Transaction { sender, recipient, amount, time, .. } => {
+            Block::Transaction { sender, recipient, amount, time, sender_nonce, .. } => {
                 hasher.update(sender);
                 hasher.update(recipient);
                 hasher.update(&amount.to_be_bytes());
                 hasher.update(time.to_string().as_bytes());
+                hasher.update(sender_nonce.to_string().as_bytes());
             }
-            Block::AccountCreation { address, time, .. } => {
+            Block::NewAccount { address, time, .. } => {
                 hasher.update(address);
                 hasher.update(time.to_string().as_bytes());
             }
@@ -229,7 +192,7 @@ impl BlockChain {
         // Update the block's hash field with the finalized hash
         match block {
             Block::Transaction { hash, .. } => { *hash = hasher.finalize().to_vec().clone(); }
-            Block::AccountCreation { hash, .. } => { *hash = hasher.finalize().to_vec().clone(); }
+            Block::NewAccount { hash, .. } => { *hash = hasher.finalize().to_vec().clone(); }
             _ => {}
         }
     }
@@ -248,14 +211,15 @@ impl BlockChain {
                 Block::Genesis { time } => {
                     hasher.update(time.to_string().as_bytes());
                 }
-                Block::Transaction { sender, recipient, amount, time, hash } => {
+                Block::Transaction { sender, recipient, amount, time, sender_nonce, hash } => {
                     hasher.update(sender);
                     hasher.update(recipient);
                     hasher.update(&amount.to_be_bytes());
                     hasher.update(time.to_string().as_bytes());
+                    hasher.update(sender_nonce.to_string().as_bytes());
                     hasher.update(hash);
                 }
-                Block::AccountCreation { address, time, hash } => {
+                Block::NewAccount { address, time, hash } => {
                     hasher.update(address);
                     hasher.update(time.to_string().as_bytes());
                     hasher.update(hash);
@@ -328,7 +292,7 @@ impl BlockChain {
         // Simulate account creation request
         let new_address = vec![0u8; 20]; // Dummy address for testing
         let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-        let request = Request::AccountCreation {
+        let request = Request::NewAccount {
             new_address: new_address.clone(),
             time,
         };
@@ -336,11 +300,11 @@ impl BlockChain {
         // Assume validation is successful and directly push the request to the chain
         blockchain.push_request_to_chain(request);
 
-        // Verify that a new AccountCreation block has been added
+        // Verify that a new NewAccount block has been added
         assert_eq!(blockchain.chain.len(), 2, "Blockchain should have 2 blocks after account creation");
 
         match &blockchain.chain[1] {
-            Block::AccountCreation { address, time: _, hash: _ } => {
+            Block::NewAccount { address, time: _, hash: _ } => {
                 assert_eq!(&address[..], &new_address[..], "The new account address should match the request");
             },
             _ => panic!("Second block should be an Account Creation block"),

@@ -10,9 +10,6 @@ extern crate rand;
 use secp256k1::{Secp256k1, SecretKey, PublicKey};
 use rand::{thread_rng, RngCore}; // Ensure thread_rng is imported here
 
-
-
-
 /**
  * @notice account_creation.rs contains the logic for sending a request to the network to create a new account.
  * This is done by generating a new keypair using the secp256k1 elliptic curve, then sending the public key to
@@ -20,8 +17,6 @@ use rand::{thread_rng, RngCore}; // Ensure thread_rng is imported here
  * 
  * The account_creation() function is called from main.rs when the user runs the node software with the [make]
 */
-
-
 
 const PORT_NUMBER: &str = "127.0.0.1:8080"; // TODO figure out how to link thi between src files
 
@@ -47,7 +42,7 @@ pub fn account_creation() {
     // block_on the account creation process, display the results   
     match rt.block_on(send_account_creation_msg()) { 
         Ok(keys) => {
-            println!("Account sucessfully created. \n\nSecret Key: {:?}, \nPublic Key: {:?}", keys.0.to_string(), keys.1.to_string());
+            println!("Account detials sucessfully created: \n\nSecret Key: {:?}, \nPublic Key: {:?}", keys.0.to_string(), keys.1.to_string());
         },
         Err(e) => { eprintln!("Account creation failed: {}", e); return; },
     };
@@ -60,8 +55,7 @@ pub fn account_creation() {
  * @return a tuple of the secret and public key generated for the new account.
  */
 async fn send_account_creation_msg() -> Result<(SecretKey, PublicKey), io::Error> {
-    println!("Sending account creation message to network...");
-
+    println!("\nSending account creation message to network...");
 
     // Generate a new keypair
     let (secret_key, public_key) = generate_keypair()?;

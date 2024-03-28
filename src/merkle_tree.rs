@@ -35,7 +35,7 @@ pub struct Account {
  * @notice the MerkleNode enum represents a single node leaf/branch in the merkle tree. 
  */
 #[derive(Debug, Clone)]
-enum MerkleNode {
+pub enum MerkleNode {
     Leaf { hash: Vec<u8> },
     Branch { hash: Vec<u8>, left: Box<MerkleNode>, right: Box<MerkleNode> },
 }
@@ -57,7 +57,7 @@ pub struct MerkleTree {
 impl MerkleTree {
 
     // constructor 
-    fn new() -> Self {
+    pub fn new() -> Self {
         MerkleTree {
             root: None,
             accountsVec: Vec::new(),

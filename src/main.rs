@@ -1,6 +1,8 @@
 use std::env;
+use validation::ValidatorNode;
+use validation::run_validation;
 
-mod accounts;
+mod account_creation;
 mod blockchain;
 mod transactions;
 mod validation;
@@ -77,16 +79,16 @@ fn main() -> std::io::Result<()> {
     if args.len() == 2 && args[1] == "make" { 
 
         // validate account creation
-        accounts::account_creation();
+        account_creation::account_creation();
         return Ok(());
 
     } // Transaction Specified
-    else if args.len() == 4 { 
+    else if args.len() == 5 && args[1] == "trasaction"{ 
 
         // extract provided arguments:
-        let private_key = &args[1];
-        let recipient = &args[2];
-        let transaction_amount = &args[3];
+        let private_key = &args[2];
+        let recipient = &args[3];
+        let transaction_amount = &args[4];
 
         // validate transaction 
         transactions::send_transaction(private_key, recipient, transaction_amount);
@@ -96,8 +98,9 @@ fn main() -> std::io::Result<()> {
 
         // extract provided arguments:
         let private_key: &String = &args[2];
-
-        validation::run_validation(private_key);
+        
+        // Run node as a validator
+        run_validation(private_key);
     } 
     else { // Improper Command
         println!("ERROR! Unrecognized Command");
