@@ -359,10 +359,13 @@ async fn verify_transaction(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>,
     // Check that the sender has sufficient balance
     if sender_balance < amount { return Ok(false);}
 
-    // update sender and recipient balances
+    // update balances and sender nonce
     sender_balance -= amount; recipient_balance += amount;
     merkle_tree_guard.change_balance(sender_address.clone(), sender_balance);
+    merkle_tree_guard.increment_nonce(sender_address.clone());
     merkle_tree_guard.change_balance(recipient_address.clone(), recipient_balance);
+
+
     
     // retrieve other Request details
     let sender_nonce: u64 = merkle_tree_guard.get_nonce(sender_address.clone()).unwrap();

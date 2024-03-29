@@ -98,6 +98,13 @@ impl MerkleTree {
         }
     }
 
+    // Increments the nonce of an account
+    pub fn increment_nonce(&mut self, public_key: Vec<u8>) {
+        if let Some(account) = self.accounts_vec.iter_mut().find(|account| account.public_key == public_key) {
+            account.nonce += 1;
+        }
+    }
+
     /**
      * @notice generate_merkle_root() is a method that generates the root hash of the merkle tree. It is called during the consensus 
      * process to validate new blocks being written to the blockchain. The method transforms accounts into leaf nodes and hashes them 
