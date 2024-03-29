@@ -82,7 +82,7 @@ fn main() -> std::io::Result<()> {
         return Ok(());
 
     } // Transaction Specified
-    else if args[1] == "transaction" && args.len() == 5 {  
+    else if args[1] == "transaction" { //&& args.len() == 5 {  
 
         // extract provided arguments:
         let private_key = &args[2];

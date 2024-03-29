@@ -275,22 +275,18 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
         // Handle Request to Make New Transaction
         else if request["action"] == "transaction" { 
 
-                let mut success: bool = false;
-
-                match verify_transaction(request, merkle_tree, blockchain.clone()).await {
-                    Ok(_success) => {success = _success;},
-                    Err(e) => {eprintln!("Transaction Validation Error: {}", e);}
-                }
-
-                // print success status
-                if success {println!("Transaction verified!"); print_chain(blockchain).await; } 
-                else { eprintln!("Transaction failed to verify"); }
+            match verify_transaction(request, merkle_tree, blockchain.clone()).await {
+                Ok(success) => {
+                    
+                    // print success status
+                    if success {println!("Transaction verified!"); print_chain(blockchain).await; } 
+                    else { eprintln!("Transaction failed to verify"); }
+                },
+                Err(e) => {eprintln!("Transaction Validation Error: {}", e);}
+            }
         } 
 
-
-
-
-        else { eprintln!("Unrecognized action: {}", request["action"]);}
+    else { eprintln!("Unrecognized action: {}", request["action"]);}
     } else {eprintln!("Failed to parse message: {}", msg);}
 }
 
@@ -341,45 +337,41 @@ async fn verify_account_creation(request: Value, merkle_tree: Arc<Mutex<MerkleTr
 async fn verify_transaction(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<bool, String> {
     println!("Verifying transaction...\n");
 
+
+    // ! TODO: Implement the client side zk proof idea for transaction verification
+
     // retrieve transaction details from request
-    let sender: Vec<u8> = request["sender"].as_str().unwrap_or_default().as_bytes().to_vec();
-    let recipient: Vec<u8> = request["recipient"].as_str().unwrap_or_default().as_bytes().to_vec();
+    let sender_address: Vec<u8> = request["sender"].as_str().unwrap_or_default().as_bytes().to_vec();
+    let recipient_address: Vec<u8> = request["recipient"].as_str().unwrap_or_default().as_bytes().to_vec();
     let amount: u64 = request["amount"].as_str().unwrap_or_default().parse().unwrap_or_default();
 
     // Lock the merkle tree while checking sender and recipient accounts
     let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
 
     // Check that the account doesnt already exist in the tree
-    if merkle_tree_guard.account_exists(sender.clone()) != true { return Ok(false); }
-    if merkle_tree_guard.account_exists(recipient.clone()) != true { return Ok(false); }
+    if merkle_tree_guard.account_exists(sender_address.clone()) != true { return Ok(false); }
+    if merkle_tree_guard.account_exists(recipient_address.clone()) != true { return Ok(false); }
         
+    // get sender and recipient balances    
+    let mut sender_balance: u64 = merkle_tree_guard.get_account_balance(sender_address.clone()).unwrap();
+    let mut recipient_balance: u64 = merkle_tree_guard.get_account_balance(recipient_address.clone()).unwrap();
+
     // Check that the sender has sufficient balance
-    let sender_balance: u64 = merkle_tree_guard.account_balance(sender.clone()).unwrap();
     if sender_balance < amount { return Ok(false);}
 
-    // Get request details
-    let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-
-    // retrieve sender and recipient accounts from merkle tree
-    let mut sender_account: Account = merkle_tree_guard.get_account(sender.clone()).unwrap();
-    let mut recipient_account: Account = merkle_tree_guard.get_account(recipient.clone()).unwrap();
-
-    // retrieve Request details
-    let sender_address: Vec<u8> = sender_account.public_key;
-    let sender_nonce: u64 = sender_account.nonce;
-    let recipient_address: Vec<u8> = recipient_account.public_key;
+    // update sender and recipient balances
+    sender_balance -= amount; recipient_balance += amount;
+    merkle_tree_guard.change_balance(sender_address.clone(), sender_balance);
+    merkle_tree_guard.change_balance(recipient_address.clone(), recipient_balance);
     
-    // Package request details in Request enum and return
+    // retrieve other Request details
+    let sender_nonce: u64 = merkle_tree_guard.get_nonce(sender_address.clone()).unwrap();
+    let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    
+    // Package request details in Request enum 
     let new_account_request: Request = Request::Transaction { 
         sender_address, sender_nonce, recipient_address, amount, time, 
     };
-
-    // TODO update sender and recipient balances in merkle tree
-    // TODO Put Account balances in blocks for transactions as well 
-    let sender_balance: u64 = merkle_tree_guard.account_balance(sender.clone()).unwrap();
-    let recipient_balance: u64 = merkle_tree_guard.account_balance(recipient.clone()).unwrap();
-
-
 
     // store and validate the request
     let mut blockchain_guard: MutexGuard<BlockChain> = blockchain.lock().await;
