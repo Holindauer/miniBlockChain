@@ -25,7 +25,6 @@ use std::io;
  
 
 pub fn send_transaction(sender: &String, recipient: &String, amount: &String) {
-    // Stub function - replace with actual implementation
 
         // Create a new Tokio runtime 
         let rt = tokio::runtime::Runtime::new().unwrap();

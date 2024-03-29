@@ -50,8 +50,8 @@ pub enum MerkleNode {
 #[derive(Debug, Clone)]
 pub struct MerkleTree {
     root: Option<MerkleNode>,
-    accountsVec: Vec<Account>,
-    accountsMap: HashMap<Vec<u8>, u64>,
+    accounts_vec: Vec<Account>,
+    accounts_map: HashMap<Vec<u8>, u64>,
 }
 
 impl MerkleTree {
@@ -60,30 +60,37 @@ impl MerkleTree {
     pub fn new() -> Self {
         MerkleTree {
             root: None,
-            accountsVec: Vec::new(),
-            accountsMap: HashMap::new(),
+            accounts_vec: Vec::new(),
+            accounts_map: HashMap::new(),
         }
     }
 
     // Hashes an Account struct and inserts into accountsMap HashMap
     pub fn insert_account(&mut self, account: Account) {
-        self.accountsVec.push(account.clone());    // accou
-        self.accountsMap.insert(account.public_key.clone(), account.balance); // Use public key as key and balance as value
+        self.accounts_vec.push(account.clone());    // accou
+        self.accounts_map.insert(account.public_key.clone(), account.balance); // Use public key as key and balance as value
     }
 
     // Retrieves account balance from accountsMap public key
     pub fn account_balance(&self, public_key: Vec<u8>) -> Option<u64> {
-        self.accountsMap.get(&public_key).cloned()
+        self.accounts_map.get(&public_key).cloned()
     }
 
     // Returns Account struct of a specific public key
     pub fn get_account(&self, public_key: Vec<u8>) -> Option<Account> {
-        self.accountsVec.iter().find(|account| account.public_key == public_key).cloned()
+        self.accounts_vec.iter().find(|account| account.public_key == public_key).cloned()
     }
     
     // Checks if an account exists
     pub fn account_exists(&self, public_key: Vec<u8>) -> bool {
-        self.accountsMap.contains_key(&public_key)
+        self.accounts_map.contains_key(&public_key)
+    }
+
+    // Changes the balance of an account
+    pub fn change_balance(&mut self, public_key: Vec<u8>, new_balance: u64) {
+        if let Some(balance) = self.accounts_map.get_mut(&public_key) {
+            *balance = new_balance;
+        }
     }
 
     /**
@@ -94,7 +101,7 @@ impl MerkleTree {
     fn generate_merkle_root(&mut self) {
 
         // Transform accounts into leaf nodes w/ .map()
-        let mut nodes = self.accountsVec.iter()
+        let mut nodes = self.accounts_vec.iter()
             .map(|account| MerkleNode::Leaf { hash: MerkleTree::hash_account(account) })
             .collect::<Vec<_>>();
         
@@ -159,7 +166,7 @@ impl MerkleTree {
         };
 
         // Convert the accountsVec to a JSON array
-        let accounts_json: Vec<serde_json::Value> = self.accountsVec.iter()
+        let accounts_json: Vec<serde_json::Value> = self.accounts_vec.iter()
             .map(|account| {
                 json!({
                     "public_key": hex::encode(&account.public_key),
@@ -219,7 +226,7 @@ impl MerkleTree {
     // Helper to clear the Merkle tree 
     fn clear(&mut self) {
         self.root = None;
-        self.accountsVec.clear();
+        self.accounts_vec.clear();
     }
 }
 
@@ -242,9 +249,9 @@ mod tests {
         tree.insert_account(account.clone());
         
         // ensure the account was added to the tree correctly
-        assert_eq!(tree.accountsVec.len(), 1);
-        assert!(tree.accountsMap.contains_key(&account.public_key));
-        assert_eq!(tree.accountsMap[&account.public_key], account.balance);
+        assert_eq!(tree.accounts_vec.len(), 1);
+        assert!(tree.accounts_map.contains_key(&account.public_key));
+        assert_eq!(tree.accounts_map[&account.public_key], account.balance);
     }
 
     /**

@@ -1,4 +1,3 @@
-use sha2::digest::block_buffer::Block;
 use tokio::sync::{Mutex, MutexGuard, mpsc};
 use tokio::time;
 use tokio::net::{TcpListener};
@@ -9,13 +8,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 use std::error::Error;
+use hex;
 
 // Import the necessary libraries
-use crate::blockchain::{BlockChain, Request};
+use crate::blockchain::{BlockChain, Request, Block};
 use crate::merkle_tree::{MerkleTree, Account};
-
-
-
 
 /**
  * @notice validation.rs contains the logic for running the validation process on the client side of the node software.
@@ -277,7 +274,6 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
 
         // Handle Request to Make New Transaction
         else if request["action"] == "transaction" { 
-                
 
                 let mut success: bool = false;
 
@@ -286,15 +282,9 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
                     Err(e) => {eprintln!("Transaction Validation Error: {}", e);}
                 }
 
-
-
-                if success {
-                    println!("Transaction verified and added to blockchain");
-                    print_chain(blockchain).await; // Pass the original blockchain variable
-                } else {
-                    eprintln!("Transaction failed to verify");
-                }
-
+                // print success status
+                if success {println!("Transaction verified!"); print_chain(blockchain).await; } 
+                else { eprintln!("Transaction failed to verify"); }
         } 
 
 
@@ -305,28 +295,27 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
 }
 
 
+/**
+ * 
+ */
 async fn verify_account_creation(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<String, String> {
     println!("Verifying account creation...\n");
 
-    // retrieve new public key sent with request as Vec<u8>
+    // retrieve new public key sent with request as Vec<u8> UTF-8 encoded
     let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
+    let public_key_hex_str: String = request["public_key"].as_str().unwrap_or_default().to_string();
 
     // Lock the merkle tree
     let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
 
     // Check that the account doesnt already exist in the tree
-    if merkle_tree_guard.account_exists(public_key.clone()) {
-        return Err("Account already exists".to_string());
-    } else {
-        println!("Account does not exist in merkle tree...\n");
-    }
+    if merkle_tree_guard.account_exists(public_key.clone()) { return Err("Account already exists".to_string());} 
+    else { println!("Account does not exist in merkle tree...\n"); }
 
     // Package account details in Account struct and insert into merkle tree
-    let account = Account {
-        public_key: public_key.clone(),
-        balance: 0,
-        nonce: 0,
-    };
+    let account = Account { public_key: public_key.clone(), balance: 0, nonce: 0, };
+
+    // Insert the account into the merkle tree
     merkle_tree_guard.insert_account(account);
     assert!(merkle_tree_guard.account_exists(public_key.clone()));
     println!("Account successfully inserted into merkle tree...\n");
@@ -336,10 +325,7 @@ async fn verify_account_creation(request: Value, merkle_tree: Arc<Mutex<MerkleTr
     let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
 
     // Package request details in Request enum and return
-    let new_account_request: Request = Request::NewAccount {
-        new_address: public_key,
-        time: time,
-    };
+    let new_account_request: Request = Request::NewAccount { new_address: public_key, time: time, };
 
     // store and validate the request
     let mut blockchain_guard: MutexGuard<BlockChain> = blockchain.lock().await;
@@ -351,19 +337,84 @@ async fn verify_account_creation(request: Value, merkle_tree: Arc<Mutex<MerkleTr
 }
 
 
-// Helper for printing the chain
-async fn print_chain(blockchain: Arc<Mutex<BlockChain>>) {
-    let blockchain_guard = blockchain.lock().await;
 
-    // retrieve the chain field and print each block using enumerate in a n itemized list
-    println!("Current State of Blockchain as Maintained on Client Side:");
-    for (i, block) in blockchain_guard.chain.iter().enumerate() {
-        println!("\nBlock {}: {:?}", i, block);
-    }
+async fn verify_transaction(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<bool, String> {
+    println!("Verifying transaction...\n");
+
+    // retrieve transaction details from request
+    let sender: Vec<u8> = request["sender"].as_str().unwrap_or_default().as_bytes().to_vec();
+    let recipient: Vec<u8> = request["recipient"].as_str().unwrap_or_default().as_bytes().to_vec();
+    let amount: u64 = request["amount"].as_str().unwrap_or_default().parse().unwrap_or_default();
+
+    // Lock the merkle tree while checking sender and recipient accounts
+    let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
+
+    // Check that the account doesnt already exist in the tree
+    if merkle_tree_guard.account_exists(sender.clone()) != true { return Ok(false); }
+    if merkle_tree_guard.account_exists(recipient.clone()) != true { return Ok(false); }
+        
+    // Check that the sender has sufficient balance
+    let sender_balance: u64 = merkle_tree_guard.account_balance(sender.clone()).unwrap();
+    if sender_balance < amount { return Ok(false);}
+
+    // Get request details
+    let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+    // retrieve sender and recipient accounts from merkle tree
+    let mut sender_account: Account = merkle_tree_guard.get_account(sender.clone()).unwrap();
+    let mut recipient_account: Account = merkle_tree_guard.get_account(recipient.clone()).unwrap();
+
+    // retrieve Request details
+    let sender_address: Vec<u8> = sender_account.public_key;
+    let sender_nonce: u64 = sender_account.nonce;
+    let recipient_address: Vec<u8> = recipient_account.public_key;
+    
+    // Package request details in Request enum and return
+    let new_account_request: Request = Request::Transaction { 
+        sender_address, sender_nonce, recipient_address, amount, time, 
+    };
+
+    // TODO update sender and recipient balances in merkle tree
+    // TODO Put Account balances in blocks for transactions as well 
+    let sender_balance: u64 = merkle_tree_guard.account_balance(sender.clone()).unwrap();
+    let recipient_balance: u64 = merkle_tree_guard.account_balance(recipient.clone()).unwrap();
+
+
+
+    // store and validate the request
+    let mut blockchain_guard: MutexGuard<BlockChain> = blockchain.lock().await;
+    blockchain_guard.store_incoming_requests(&new_account_request);
+    blockchain_guard.push_request_to_chain(new_account_request);   
+
+
+    Ok(true) 
 }
 
 
-async fn verify_transaction(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<bool, String> {
+// Helper for printing the chain
+async fn print_chain(blockchain: Arc<Mutex<BlockChain>>) {
+    let blockchain_guard: MutexGuard<'_, BlockChain> = blockchain.lock().await; // lock blockchain for printing
 
-    Ok(true)
+    println!("\nCurrent State of Blockchain as Maintained on Client Side:");
+    for (i, block) in blockchain_guard.chain.iter().enumerate() {
+        match block {
+            Block::NewAccount { address, time, hash } => {
+                // Directly use address as it's already a UTF-8 encoded hex string
+                let hash_hex = hex::encode(hash); // Assuming hash is a Vec<u8> needing encoding
+                let address = String::from_utf8(address.clone()).unwrap();
+                println!("\nBlock {}: \n\tNew Account: {:?}\n\tTime: {}\n\tHash: {}", i, address, time, hash_hex);
+            },
+            Block::Transaction { sender, sender_nonce, recipient, amount, time, hash } => {
+                // Directly use sender and recipient as they're already UTF-8 encoded hex strings
+                let hash_hex = hex::encode(hash); // Assuming hash is a Vec<u8> needing encoding
+                let sender = String::from_utf8(sender.clone()).unwrap();
+                let recipient = String::from_utf8(recipient.clone()).unwrap();
+
+                println!("\nBlock {}: \n\tSender: {}\n\tSender Nonce: {}\n\tRecipient: {}\n\tAmount: {}\n\tTime: {:}\n\tHash: {}", i, sender, sender_nonce, recipient, amount, time, hash_hex);
+            },
+            Block::Genesis { time } => {
+                println!("\nBlock {}: \n\tGenesis Block\n\tTime: {:?}", i, time);
+            },
+        }
+    }
 }

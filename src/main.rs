@@ -1,5 +1,4 @@
 use std::env;
-use validation::ValidatorNode;
 use validation::run_validation;
 
 mod account_creation;
@@ -92,7 +91,7 @@ fn main() -> std::io::Result<()> {
 
         // validate transaction 
         send_transaction::send_transaction(private_key, recipient, transaction_amount);
-
+ 
     }// Validation Specified 
     else if args.len() == 3 && args[1] == "validate" { 
 

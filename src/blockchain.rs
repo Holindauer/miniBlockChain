@@ -6,9 +6,6 @@ use serde::{Serialize, Deserialize};
 
 
 
-use crate::merkle_tree::{MerkleTree, Account};
-
-
 /**
  * @notice blockchain.rs contains the structs and methods for creating and manipulating blocks in the blockchain.
  * There are three types of blocks in the blockchain: Genesis, Transaction, and Account Creation.
@@ -30,6 +27,7 @@ use crate::merkle_tree::{MerkleTree, Account};
 /**
  * @notice TransactionRequest structs packages information about a single request to write information to the blockchain.
  * @dev The two types of writing requests are: Transaction and NewAccount.
+ * @dev All addresses are stored as UTF-8 encoded byte vectors.
  * @param senderAdress - the Blockchainaddress of the sender.
  * @param senderNonce - the nonce of the sender. (num transactions sender has made).
  * @param recipientAdress - the address of the recipient.
@@ -41,7 +39,7 @@ pub enum Request {
         sender_address: Vec<u8>,
         sender_nonce: u64,
         recipient_address: Vec<u8>,
-        amount: f32,
+        amount: u64,
         time: u64,
     }, 
     NewAccount {
@@ -50,27 +48,10 @@ pub enum Request {
     }
 }
 
-// impl PartialEq for Request {
-//     fn eq(&self, other: &Self) -> bool { // Implementing PartialEq for Request Structs 
-//         match (self, other) {
-//             // Compare each field for both type of Request
-//             (Request::Transaction { sender_address: a1, sender_nonce: n1, recipient_address: r1, amount: am1, time: t1 },
-//              Request::Transaction { sender_address: a2, sender_nonce: n2, recipient_address: r2, amount: am2, time: t2 }) => {
-//                 a1 == a2 && n1 == n2 && r1 == r2 && am1 == am2 && t1 == t2
-//             },
-//             (Request::NewAccount { new_address: a1, time: t1 },
-//              Request::NewAccount { new_address: a2, time: t2 }) => {
-//                 a1 == a2 && t1 == t2
-//             },
-            
-//             _ => false,
-//         }
-//     }
-// }
-
  /**
   * @notice Block is an enum that represents the different types of blocks that can be added to the blockchain.
   * @dev The Block enum is used to store the data of the block and differentiate between the different types of blocks.
+  * @dev All addresses are stored as UTF-8 encoded byte vectors.
 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Block {
@@ -185,33 +166,19 @@ impl BlockChain {
                 Block::NewAccount { address: new_address.clone(), time: *time, hash }
             },
         };
-
-        // Hash the block data
-        self.hash_block_data(&mut block);
+        self.hash_block_data(&mut block); // set the hash of the block
         
-        println!("Block created...\n");
-    
-        // Push the new block to the blockchain
-        self.chain.push(block);
-    
-        // Assuming the address for the pending request queue and joint request map is the same as used in creating the block
-        self.pending_request_queue.pop_front();
-    
-        // Now you can use the address variable here without issue
 
+        // Push the new block to the blockchain
+        self.chain.push(block);    
+        self.pending_request_queue.pop_front(); // Remove leading address from the queue
+    
         // retrieve mutable vector of all requests from the sender
         if let Some(requests) = self.joint_request_map.get_mut(&address) {
 
-            // Remove the request from the vector that matches the one added to the blockchain
-            if let Some(index) = requests.iter().position(|r| *r == request) {
-                requests.remove(index); 
-            }
+            // Remove the request from requests Vec that matches the one added to the blockchain
+            if let Some(index) = requests.iter().position(|r| *r == request) { requests.remove(index); }
         }
-    }
-
-    // Validates all transactions related to a single sender
-    pub fn validate_transaction(&mut self, request: Request, merkle_tree: &mut MerkleTree) {    
-        println!("Function Stub for validate_transaction() called.");
     }
 
     // Sets the hash of a block based on its data
