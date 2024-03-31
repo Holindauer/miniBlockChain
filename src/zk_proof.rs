@@ -91,11 +91,35 @@ pub fn verify_points_sum_hash(encoded_point1: &str, encoded_point2: &str, expect
 #[cfg(test)]
 mod tests {
     use super::*;
+    use curve25519_dalek::scalar::Scalar;
+    use secp256k1::Secp256k1;
 
     #[test]
-    fn test_obscure_private_key() {
-        // let private_key_hex
+    fn test_verify_points_sum_hash() {
 
-    }
-
+         // Initialize the RNG and generate two scalars
+         let scalar1: Scalar = Scalar::from(1234567890u64);
+         let scalar2: Scalar = Scalar::from(987654321u64);
+ 
+         // Generate two points by multiplying the base point by the scalars
+         let point1: RistrettoPoint = RISTRETTO_BASEPOINT_POINT * scalar1;
+         let point2: RistrettoPoint = RISTRETTO_BASEPOINT_POINT * scalar2;
+ 
+         // Encode points to Base64
+         let encoded_point1: String = base64::encode(point1.compress().to_bytes());
+         let encoded_point2: String = base64::encode(point2.compress().to_bytes());
+ 
+         // Sum the points and compute SHA-256 hash of the result
+         let sum_point: RistrettoPoint = point1 + point2;
+         let sum_point_bytes: [u8; 32] = sum_point.compress().to_bytes();
+         let expected_hash = Sha256::digest(&sum_point_bytes);
+ 
+         // Convert the SHA-256 hash to a Vec<u8> to match the function signature
+         let expected_hash_vec: Vec<u8> = expected_hash.to_vec();
+ 
+         // Run the verification function with the encoded points and the expected hash
+         assert!(verify_points_sum_hash(&encoded_point1, &encoded_point2, expected_hash_vec),
+                 "The verification of the points sum hash should succeed.");
+     }
 }
+
