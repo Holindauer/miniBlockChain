@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write};
 use hex;
+use curve25519_dalek::ristretto::{RistrettoPoint, CompressedRistretto};
 
 /**
  * @notice merkleTree.rs contains an implementation of a merkle tree for the purpose of retrieval of 
@@ -23,10 +24,16 @@ use hex;
  * @param public_key - the public key of the account as a vector of bytes.
  * @param balance - the balance of the account.
  * @param nonce - the nonce of the account (amount of transactions sent from this account).
+ * @param obfuscated_private_key - the obfuscated private key is a hash of the private key of the account when represented
+ * as an elliptic curve point. The curve25519_dalek library is used to perform scalar multiplication with the generator point 
+ * and the private key. Knowledge of the private key by a user during transaction request is verified in a simple zk proof
+ * by provding two numbers that sum to the private key private key, that when added together as elliptic curve points add 
+ * to the obfuscated public key.
  */
 #[derive(Debug, Clone)]
 pub struct Account {
     pub public_key: Vec<u8>,
+    pub obfuscated_private_key_hash: Vec<u8>,
     pub balance: u64,
     pub nonce: u64,
 }
@@ -113,7 +120,7 @@ impl MerkleTree {
     fn generate_merkle_root(&mut self) {
 
         // Transform accounts into leaf nodes w/ .map()
-        let mut nodes = self.accounts_vec.iter()
+        let mut nodes: Vec<MerkleNode> = self.accounts_vec.iter()
             .map(|account| MerkleNode::Leaf { hash: MerkleTree::hash_account(account) })
             .collect::<Vec<_>>();
         
@@ -144,6 +151,7 @@ impl MerkleTree {
         hasher.update(&account.public_key);
         hasher.update(&account.balance.to_be_bytes());
         hasher.update(&account.nonce.to_be_bytes());    
+        hasher.update(&account.obfuscated_private_key_hash);
 
         // return the hash
         hasher.finalize().to_vec()
@@ -182,6 +190,7 @@ impl MerkleTree {
             .map(|account| {
                 json!({
                     "public_key": hex::encode(&account.public_key),
+                    "obfuscated_private_key": hex::encode(&account.obfuscated_private_key_hash),
                     "balance": account.balance,
                     "nonce": account.nonce,
                 })
@@ -224,12 +233,15 @@ impl MerkleTree {
         for account in accounts_json {
 
             // Extract account details from the JSON object
-            let public_key = hex::decode(account["public_key"].as_str().unwrap()).unwrap();
-            let balance = account["balance"].as_u64().unwrap();
-            let nonce = account["nonce"].as_u64().unwrap();
+            let public_key: Vec<u8> = hex::decode(account["public_key"].as_str().unwrap()).unwrap();
+            let balance: u64 = account["balance"].as_u64().unwrap();
+            let nonce: u64 = account["nonce"].as_u64().unwrap();
+
+            // Inside your deserialization loop for accounts
+            let obfuscated_private_key_hash: Vec<u8> = hex::decode(account["obfuscated_private_key"].as_str().unwrap()).unwrap();
 
             // Add the account to the Merkle tree
-            self.insert_account(Account { public_key, balance, nonce });
+            self.insert_account(Account { public_key, balance, nonce, obfuscated_private_key_hash });
         }
 
         Ok(())
@@ -255,6 +267,7 @@ mod tests {
         let mut tree = MerkleTree::new(); // create a new MerkleTree instance
         let account = Account { // create a new Account instance w/ mock data
             public_key: vec![1, 2, 3, 4],
+            obfuscated_private_key_hash: vec![1, 2, 3, 4],
             balance: 100,
             nonce: 1,
         };
@@ -274,6 +287,7 @@ mod tests {
         let mut tree = MerkleTree::new(); // create a new MerkleTree instance
         let account = Account { // create a new Account instance w/ mock data
             public_key: vec![1, 2, 3, 4],
+            obfuscated_private_key_hash : vec![1, 2, 3, 4],
             balance: 100,
             nonce: 1,
         };
@@ -292,6 +306,7 @@ mod tests {
         let mut tree = MerkleTree::new();
         let account = Account {
             public_key: vec![1, 2, 3, 4],
+            obfuscated_private_key_hash: vec![1, 2, 3, 4],   
             balance: 100,
             nonce: 1,
         };  
@@ -315,6 +330,7 @@ mod tests {
         let mut tree = MerkleTree::new();
         let account = Account {
             public_key: vec![1, 2, 3, 4],
+            obfuscated_private_key_hash: vec![1, 2, 3, 4],
             balance: 100,
             nonce: 1,
         };
@@ -328,6 +344,7 @@ mod tests {
         let mut tree = MerkleTree::new(); // create a new MerkleTree instance
         let account1 = Account { // create a new Account instance w/ mock data
             public_key: vec![1, 2, 3, 4], 
+            obfuscated_private_key_hash: vec![1, 2, 3, 4],
             balance: 100,
             nonce: 1,
         };

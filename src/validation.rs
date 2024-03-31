@@ -300,6 +300,7 @@ async fn verify_account_creation(request: Value, merkle_tree: Arc<Mutex<MerkleTr
     // retrieve new public key sent with request as Vec<u8> UTF-8 encoded
     let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
     let public_key_hex_str: String = request["public_key"].as_str().unwrap_or_default().to_string();
+    let obfuscated_private_key_hash: Vec<u8> = hex::decode(request["obfuscated_private_key_hash"].as_str().unwrap_or_default()).unwrap();
 
     // Lock the merkle tree
     let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
@@ -309,7 +310,7 @@ async fn verify_account_creation(request: Value, merkle_tree: Arc<Mutex<MerkleTr
     else { println!("Account does not exist in merkle tree...\n"); }
 
     // Package account details in Account struct and insert into merkle tree
-    let account = Account { public_key: public_key.clone(), balance: 0, nonce: 0, };
+    let account = Account { public_key: public_key.clone(), obfuscated_private_key_hash: obfuscated_private_key_hash.clone(), balance: 0, nonce: 0, };
 
     // Insert the account into the merkle tree
     merkle_tree_guard.insert_account(account);

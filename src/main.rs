@@ -6,6 +6,7 @@ mod blockchain;
 mod send_transaction;
 mod validation;
 mod merkle_tree;
+mod zk_proof;
 
 /**
  * @notice main.rs runs a blockchain node which connects to a TCP server in order to interact with the blockchain. 

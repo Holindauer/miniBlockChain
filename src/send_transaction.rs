@@ -4,6 +4,14 @@ use serde::{Serialize, Deserialize};
 use serde_json;
 use std::io;
 
+extern crate secp256k1;
+extern crate hex;
+
+
+use secp256k1::{Secp256k1, SecretKey, PublicKey};
+use std::str::FromStr;
+
+
 /**
  * @notice send_tranasaction.rs contains the logic for sending a network
  * request to transact value between two accounts in the network.
@@ -21,9 +29,8 @@ use std::io;
      pub sender: String,
      pub recipient: String,
      pub amount: String,
- }
+}
  
-
 pub fn send_transaction(sender: &String, recipient: &String, amount: &String) {
 
         // Create a new Tokio runtime 
@@ -35,8 +42,6 @@ pub fn send_transaction(sender: &String, recipient: &String, amount: &String) {
             Err(e) => { eprintln!("Account creation failed: {}", e); return; },
         };       
 }   
-
-
 
 /**
  * @notice send_account_creation_msg() asynchonously creates and packages a new keypair. Then sends
