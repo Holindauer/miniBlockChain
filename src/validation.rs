@@ -13,6 +13,7 @@ use hex;
 // Import the necessary libraries
 use crate::blockchain::{BlockChain, Request, Block};
 use crate::merkle_tree::{MerkleTree, Account};
+use crate::zk_proof::{verify_points_sum_hash};
 
 /**
  * @notice validation.rs contains the logic for running the validation process on the client side of the node software.
@@ -254,7 +255,6 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
 
     // convert the buffer to a string and print
     let msg = String::from_utf8_lossy(&buffer[..buffer.len()]);
-        
     println!("Message: {}\n", msg);
 
     // After parsing to JSON determine what to do with the msg
@@ -262,7 +262,7 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
             
         // Handle Request to Make New Account
         if request["action"] == "make" { 
-
+            
             match verify_account_creation(request, merkle_tree, blockchain.clone()).await {
                 Ok(public_key) => {
                     println!("Account creation verified for public key: {}", public_key);
@@ -338,16 +338,32 @@ async fn verify_account_creation(request: Value, merkle_tree: Arc<Mutex<MerkleTr
 async fn verify_transaction(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<bool, String> {
     println!("Verifying transaction...\n");
 
-
-    // ! TODO: Implement the client side zk proof idea for transaction verification
-
     // retrieve transaction details from request
-    let sender_address: Vec<u8> = request["sender"].as_str().unwrap_or_default().as_bytes().to_vec();
-    let recipient_address: Vec<u8> = request["recipient"].as_str().unwrap_or_default().as_bytes().to_vec();
+    let sender_address: Vec<u8> = request["sender_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
+    let recipient_address: Vec<u8> = request["recipient_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
     let amount: u64 = request["amount"].as_str().unwrap_or_default().parse().unwrap_or_default();
 
-    // Lock the merkle tree while checking sender and recipient accounts
+    // retrieve sender obfuscated private key parts
+    let curve_point1: String = request["sender_obfuscated_private_key_part1"].as_str().unwrap_or_default().to_string();
+    let curve_point2: String = request["sender_obfuscated_private_key_part2"].as_str().unwrap_or_default().to_string();
+
+    // Lock the merkle tree while accessing sender accountinfo
     let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
+
+    println!("Sender Address: {:?}", sender_address);
+
+    // retrieve sender's account
+    let sender_account: Account = merkle_tree_guard.get_account(sender_address.clone()).unwrap();
+
+    // retrieve sender's private key hash
+    let sender_private_key_hash: Vec<u8> = sender_account.obfuscated_private_key_hash.clone();
+
+    println!("Sender Private Key Hash: {:?}", sender_private_key_hash);
+
+    // decompress the curve points
+    if verify_points_sum_hash(&curve_point1, &curve_point2, sender_private_key_hash) != true { 
+        return Ok(false); 
+    }
 
     // Check that the account doesnt already exist in the tree
     if merkle_tree_guard.account_exists(sender_address.clone()) != true { return Ok(false); }
@@ -365,8 +381,6 @@ async fn verify_transaction(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>,
     merkle_tree_guard.change_balance(sender_address.clone(), sender_balance);
     merkle_tree_guard.increment_nonce(sender_address.clone());
     merkle_tree_guard.change_balance(recipient_address.clone(), recipient_balance);
-
-
     
     // retrieve other Request details
     let sender_nonce: u64 = merkle_tree_guard.get_nonce(sender_address.clone()).unwrap();
@@ -414,3 +428,4 @@ async fn print_chain(blockchain: Arc<Mutex<BlockChain>>) {
         }
     }
 }
+

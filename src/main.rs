@@ -83,15 +83,16 @@ fn main() -> std::io::Result<()> {
         return Ok(());
 
     } // Transaction Specified
-    else if args[1] == "transaction" { //&& args.len() == 5 {  
+    else if args[1] == "transaction" {
 
         // extract provided arguments:
-        let private_key = &args[2];
-        let recipient = &args[3];
-        let transaction_amount = &args[4];
+        let sender_public_key = &args[2];
+        let sender_private_key = &args[3];
+        let recipient_public_key = &args[4];
+        let transaction_amount = &args[5];
 
         // validate transaction 
-        send_transaction::send_transaction(private_key, recipient, transaction_amount);
+        send_transaction::send_transaction(sender_public_key, sender_private_key, recipient_public_key, transaction_amount);
  
     }// Validation Specified 
     else if args.len() == 3 && args[1] == "validate" { 
