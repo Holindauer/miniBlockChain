@@ -12,18 +12,18 @@ use std::convert::TryInto;
  * the private key of an account for transaction requests. 
  * 
  * Protocol: 
- *  When an account is created, a unique identifier for the account is created by multiplying the private key of the account
- *  with the generator point of an elliptic curve (curve25519) over a finite field. This curve point is then hashed with sha256
- *  and stored in the account information within the merkle tree. 
+ *    When an account is created, a unique identifier for the account is created by multiplying the private key of the account
+ *    with the generator point of an elliptic curve (curve25519) over a finite field. This curve point is then hashed with sha256
+ *    and stored in the account information within the merkle tree. 
  * 
- *  When a transaction is requested, the sender client will accept the private key of the account. This private key is then 
- *  split into a sum of two scalars at a random split point. These scalars are each multiplied with the generator. They are 
- *  sent to the network, to which validators will verify that the hash of the two points added together is the same as the 
- *  one in the merkle tree for the account in question.
+ *    When a transaction is requested, the sender client will accept the private key of the account. This private key is then 
+*     split into a sum of two scalars at a random split point. These scalars are each multiplied with the generator. They are 
+ *    sent to the network, to which validators will verify that the hash of the two points added together is the same as the 
+ *    one in the merkle tree for the account in question.
  * 
- *  All previous two point pairs will also be tracked in a hash map to ensure that the same proof is not used twice. This will 
- *  prevent a malicious actor from gaining knowledge of a proof that has already been used and taking advantage of the fact that
- *  it will add/hash to the value stored in the merkle tree. 
+ *    All previous two point pairs will also be tracked in a hash map to ensure that the same proof is not used twice. This will 
+ *    prevent a malicious actor from gaining knowledge of a proof that has already been used and taking advantage of the fact that
+ *    it will add/hash to the value stored in the merkle tree. 
  */
 
 /**

@@ -9,65 +9,60 @@ mod merkle_tree;
 mod zk_proof;
 
 /**
- * @notice main.rs runs a blockchain node which connects to a TCP server in order to interact with the blockchain. 
+ * @notice main.rs runs a blockchain node which connects to a TCP server in order to write to the blockchain. 
  *         There are three options when connecting a node from the CLI: Account Creaction, Trancation, Validation
  *
- * Acount Creation:
+ * 1.) Acount Creation:
  *  
- * 1.) The first is to make an account by providing the [make] argument when running the node software. 
+ *     An account can be made by running the following command: 
  *  
- *      cargo run make
+ *         cargo run make
  *  
- *     This will alert validators that a new public and private key has been generated and needs to be updated 
- *     across the distributed network. The key is generated on the client side using elliptic curve cryptography 
- *     (secp256k1)and distributed to the network. Validators are responsible for fascilitaing these 
- *     transcations within the network, which will include minimal checks at this stage in the development.
- *     Just checking that a prexisting account is not being overwritten (extremely unlikely since using 
- *     secp256k1). The new account will aslo be integrated into the merkel tree that contains all 
- *     (private-key, account-balance) pairs of all accounts created up to this point. Accounts not creates 
- *     yet are implicitly at a balance of 0 and "become accounts" that can transactions once created using 
- *     [make] from CLI.
+ *     On the client side, a new private/public key pair will be generated using the secp256k1 elliptic curve
+ *     over a finite field. The client will send a network request to all validators running nodes that a new 
+ *     account creation is being requested. Validators will check that the account does not already exist in the
+ *     merkel tree, and if not, it will be added and a new block will be created in the blockchain. Otherwise, 
+ *     the account creation will be rejected. Additionally, in each block will be stored the hash of an elliptic 
+ *     curve representation of the new user's private key will be stored for a zk proofs of knowledge verification 
+ *     of the user's account balance when sending transactions.
  * 
- *     This is done in the accounts.rs modulue. 
+ * 2.) Transaction: 
  * 
- *     As well, a block will be added to the chain, indicating that a new account was created with current
- *     balance zero. This is done in block.rs.
+ *     To send a transaction provide the following arguments to the CLI:
  * 
- * Transaction: 
+ *     cargo run [sender private key] [recipiant public key] [transaction amount]
  * 
- * 2.) The second option is to send a transaction by providing the following arguments to the CLI:
+ *     On the client side, the private key will be converted into an obfuscated representation as multiple ellitpic 
+ *     curve points that sum to the elliptic curve representaiton of the original privte key (scalar multiplication). 
+ *     This and the other provided details of the transaction (including the derived public key) will be packaged and 
+ *     sent as a transaction request to all validators running nodes.
  * 
- *     cargo run [private key] [recipiant public key] [transaction amount]
- * 
- *     This will trigger a validation event to all users currently running nodes that a new transaction 
- *     is waiting to be validated. Validation will involves searching the merkel tree to find the private 
- *     key's account balance, and checking if there is sufficient balance for sending the amount specified. 
+ *     Validators will sum the elliptic curve points and hash the result. If this hash matches the hash recorded in 
+ *     the merkle tree for the provded account, the user who sent the request will be assumed to have knowledge of the 
+ *     private key. The account will be checked to have sufficient balance to send the transaciton.
  *     
- *     Assuming validation is successful, the balance of the sender will be decreased by the transaction
- *     amount, vice versa for the recipiant. A new block will be added to the chain reflecting this change.
+ *     Assuming validation is successful, the balance of the sender will be decreased by the transaction amount, and 
+ *     vice versa for the recipiant. A new block will be added to the chain reflecting this change.
  *  
- * Validation:
+ * 3.) Validation:
  * 
- * 3.) Whereas Transactions and Account Creations are shorted lived processes for the user. Running the [validate]
- *     argument will contunually run the validation process until the program is exited. Validators keep the TCP
- *     server online, fascilitating the computation and documentation of incoming transactions and account creations 
- *     within the shared ledger (blockchain). 
+ *     A validator node can be run by providing the following arguments to the CLI:
+ * 
+ *     cargo run validate [private key]
+ * 
+ *     This will trigger the node software to send a network request to all other validator nodes that a new node is 
+ *     requesting the current state of the blockchain and merkel tree. Each node will send their current state to the 
+ *     connecting node. Each of these states will be hashed and counted to determine the majority consensis of the 
+ *     network. This state will then be adopted by the connecting node and stored/maintained locally. If this is the 
+ *     first node of the network, the connecting node will create the genesis block and establish an empty merkel tree.
+ * 
+ *     Once a node has connected, it will begin to listen for incoming transactions and account creations. The logic 
+ *     of the above described processes will be fasciliated by the node software.  
+ * 
+ * 4.) Fountain: 
  *     
- *     There are two datastructures that are maintained by validators: 
- * 
- *          - The blockchain is a linked list of Block structs storing events that have occured.
- *          - A merkel tree that stores (public-key, account-balance) pairs. 
- * 
- *     The blockchain data and merkel tree data are both stored in seperate json files. Each file contains the data
- *     structure itself, as well as its accumulated hash. These files are maintained on the client side by users
- *     running the validation process of the node software. Validation ensures the integrity of the blockchain
- *     and merkel tree data in the following two ways:
- *     
- *          - Transactions are checked for sufficient balance. Accounts are checked for duplication.
- *          - The more import validation check is to make sure that the hash of the blockchain and merkel tree
- *            before and after the transaction are the same across all nodes currently running the validation
- *            process. A majority consensis across nodes is required to validate a transaction.
- * 
+ *     Using the fountain command will send a network request to validator nodes to provide a given public key with a 
+ *     small amount of tokens that can be used to send transactions with. This is for testing purposes.
  */
 
 fn main() -> std::io::Result<()> {
@@ -76,33 +71,43 @@ fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
 
     // Account Creation Specified  
-    if args[1] == "make" && args.len() == 2  { 
+    if args[1] == "make" && args.len() == 2{ 
 
-        // validate account creation
+        // send account creation request to validator nodes
         account_creation::account_creation();
         return Ok(());
 
     } // Transaction Specified
-    else if args[1] == "transaction" {
+    else if args[1] == "transaction" && args.len() == 6{  // TODO remove the need to provide the public key by using the private key to find the public key
 
         // extract provided arguments:
-        let sender_public_key = &args[2];
-        let sender_private_key = &args[3];
-        let recipient_public_key = &args[4];
-        let transaction_amount = &args[5];
+        let sender_public_key: &String = &args[2];
+        let sender_private_key: &String = &args[3];
+        let recipient_public_key: &String = &args[4];
+        let transaction_amount: &String = &args[5];
 
-        // validate transaction 
-        send_transaction::send_transaction(sender_public_key, sender_private_key, recipient_public_key, transaction_amount);
+        // send transaction request to validator nodes
+        send_transaction::send_transaction(
+            sender_public_key, 
+            sender_private_key, 
+            recipient_public_key, 
+            transaction_amount
+        );
  
     }// Validation Specified 
-    else if args.len() == 3 && args[1] == "validate" { 
+    else if args[1] == "validate" && args.len() == 3{ 
 
         // extract provided arguments:
         let private_key: &String = &args[2];
         
         // Run node as a validator
         run_validation(private_key);
-    } 
+
+    } // Fountain Specified
+    else if args[1] == "fountain" && args.len() == 2 {
+    
+        let public_key: &String = &args[1];
+    }
     else { // Improper Command
         println!("ERROR! Unrecognized Command");
         return Ok(());

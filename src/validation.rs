@@ -1,9 +1,9 @@
 use tokio::sync::{Mutex, MutexGuard, mpsc};
 use tokio::time;
-use tokio::net::{TcpListener};
-use tokio::io::{AsyncReadExt};
+use tokio::net::TcpListener;
+use tokio::io::AsyncReadExt;
 use tokio::runtime::Runtime;
-use serde_json::{Value};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
@@ -13,35 +13,37 @@ use hex;
 // Import the necessary libraries
 use crate::blockchain::{BlockChain, Request, Block};
 use crate::merkle_tree::{MerkleTree, Account};
-use crate::zk_proof::{verify_points_sum_hash};
+use crate::zk_proof::verify_points_sum_hash;
 
 /**
- * @notice validation.rs contains the logic for running the validation process on the client side of the node software.
- * This process can roughly be split up into two sections: setup and validation.
+ * @notice validation.rs contains the logic for running a validator node. This involves setup and validation steps.
  * 
  * Setup:
- *  When a new validator node starts up, it will need to retireve the current majority state of the blockchain and merkle tree 
- *  into local memory (will need to be stored on disk for larger networks, but for now memory is fine). There are two cases that
- *  need to be handled here:
+ *    When a new validator node starts up, it must retrieve the current majority state of the blockchain and merkle tree and 
+ *    store it locally. There are scenarios:
  * 
- *    - The node is starting a new blockchain from scratch. In this case, the node will create a single genesis block and an
- *      empty merkle tree.
- *    - The node is joining an existing network. In this case, the node will need to request the latest blockchain and merkle
- *      tree from all current peers in the network. The node will hash each retireved blockchain and determine the majority 
- *      chain based on the hash. The node will then update its local blockchain to the majority chain and merkle tree.
+ *       1.) The node is starting a new blockchain from scratch. In this case, the node will create the genesis block and an
+ *           empty merkle tree.
  * 
- *  After the blockchain and merkle tree have been set up, then the node will start listening for incoming connections from
- *  other nodes in the network.
+ *       2.) The node is joining an existing network. In this case, the node will send a request for the latest blockchain 
+ *           and merkle tree state from all current peers in the network. The node will hash each blockchain and determine 
+ *           the majority consensus of the network state based on the most common hash. The node will then update its local 
+ *           blockchain to the majority chain and merkle tree.
+ * 
+ *    After the blockchain and merkle tree are up to date, the node will start listening for incoming connections from into 
+ *    the network.
  * 
  * Validation:
- *  The validation process is an asynchronous task that listens for incoming connections on the specified address. It will spawn
- *  new tasks to handle each incoming connection. There will be in total 4 types of incoming messages that a node will respond 
- *  to:
+ *    Once the node is listening for incoming connections on the specified port, It will spawn new tasks to handle each incoming 
+ *    connection. Such connects could include requests for:
  * 
- *   - Account Creation
- *   - Transaction
- *   - View Account Balance
- *   - Request for latest Blockchain and Merkle Tree
+ *       - Account Creation 
+ *       - Transaction
+ *       - View Account Balance
+ *       - Request for latest Blockchain and Merkle Tree
+ * 
+ *    TODO eventually, risc0 will be used to validate the correct execution of validator nodes. As well, staking/slashing and 
+ *    TODO validator rewards will be need to be implemented at some point.
  */
 
 
@@ -51,15 +53,14 @@ const PORT_NUMBER: &str = "127.0.0.1:8080";
 const DURATION_GET_PEER_CHAINS: Duration = Duration::from_secs(1);  
 
 /**
- * @notice ValidatorNode is a struct that contains the blockchain and merkle tree data structures.
- * @dev blockchain and merkle tree are the local copies of network state that is maintained and 
- * distributed by individual nodes to other nodes in the network.
+ * @notice ValidatorNode contains the local copies of the blockchain and merkle tree data structures that 
+ * are maintained by independent validator nodes in the network.
+ * @dev The blockchain and merkle tree are wrapped in Arc<Mutex> to allow for safe concurrent access between tasks.
  */
 #[derive(Clone)]
 pub struct ValidatorNode {
     blockchain: Arc<Mutex<BlockChain>>,
     merkle_tree: Arc<Mutex<MerkleTree>>,
-
 }
 
 impl ValidatorNode {
@@ -75,17 +76,18 @@ impl ValidatorNode {
 
 /**
  * @notice run_validation() is a wrapper called within main.rs that instigates the process of accessing
- * the network from the client side for running the validation process. 
+ * the network from the client side for running a validator node.
  */
-pub fn run_validation(private_key: &String) { // ! TDOO implemnt private key/staking idea. Private key to send tokens to
+pub fn run_validation(private_key: &String) { // TODO implemnt private key/staking idea. Private key to send tokens to
     println!("Booting Up Validator Node...\n");
 
-    // init mutable validator node struct and run validation
-    let mut validator_node: ValidatorNode = ValidatorNode::new();
+    // init validator node struct w/ empty blockchain and merkle tree
+    let validator_node: ValidatorNode = ValidatorNode::new();
 
-    let rt = Runtime::new().unwrap(); // new Tokio runtime
+    // establish a new tokio runtime
+    let rt = Runtime::new().unwrap(); 
 
-    // Send request to peers to update to network majority blockchain state. 
+    // send request to peers to update to network majority blockchain state. 
     rt.block_on(async { update_local_blockchain(validator_node.blockchain.clone()).await; });
 
     // listen for and process incoming request
@@ -93,20 +95,21 @@ pub fn run_validation(private_key: &String) { // ! TDOO implemnt private key/sta
 }
 
 /**
- * @notice update_local_blockchain() 
+ * @notice update_local_blockchain() is an asynchronous function that fascililtates the process of updating the local 
+ * blockchain and merkle tree to the majority state of the network. This function is called by validation::run_validation() 
+ * when booting up a new validator node.
 */
 async fn update_local_blockchain(local_chain: Arc<Mutex<BlockChain>>) {
-    println!("Accepting blockchain records from peers for {} seconds...\n", DURATION_GET_PEER_CHAINS.as_secs());
+    println!("Accepting blockchain records from peers for {} seconds...\n", DURATION_GET_PEER_CHAINS.as_secs());  // TODO eventually move the blockchain update funcs into a seperate file. validation.rs is getting too big
  
      // Get majority network chain state if available
      match collect_blockchain_records(DURATION_GET_PEER_CHAINS).await {
- 
          Ok(peer_blockchains) => {
  
              // Determine the majority blockchain consensus
              let majority_blockchain: Option<BlockChain> = determine_majority_blockchain(peer_blockchains);
      
-             // If >50% of peers agree on a blockchain, update the local blockchain
+             // If >50% of peers did agree on a blockchain, update the local blockchain
              if let Some(majority_chain) = majority_blockchain {
  
                  // Lock the mutex to safely update the blockchain
@@ -125,7 +128,7 @@ async fn update_local_blockchain(local_chain: Arc<Mutex<BlockChain>>) {
   * port and collects blockchain records from peer validation nodes. This function is called by update_local_blockchain() and
   * is not intended to be called directly.
   */
- async fn collect_blockchain_records(duration: Duration) -> Result<Vec<BlockChain>, Box<dyn Error>> {
+ async fn collect_blockchain_records(duration: Duration) -> Result<Vec<BlockChain>, Box<dyn Error>> { // ! TODO Does this ever request the blockchain from the peers?
  
      // MPSC (multi-producer, single-consumer) channel to collect blockchain records between tasks
      let (tx, mut rx) = mpsc::channel(32); 
@@ -141,7 +144,7 @@ async fn update_local_blockchain(local_chain: Arc<Mutex<BlockChain>>) {
              tokio::select! {
  
                  // Break if time is up
-                 _ = time::sleep_until(end_time) => { break; }
+                 _ = time::sleep_until(end_time) => { break; } 
  
                  // Accept incoming connections
                  Ok((mut socket, _)) = listener.accept() => {
@@ -180,10 +183,10 @@ async fn update_local_blockchain(local_chain: Arc<Mutex<BlockChain>>) {
  }
  
  /**
-  * @notice determine_majority_blockchain() is a function that takes a vector of blockchain records, takes
-  * the hash of each blockchain, and determines the majority blockchain based on the hash. 
-  * @dev This function is called directly after requesting blockchain records from peers when updating the local 
-  * blockchain to the majority state within update_local_blockchain().
+  * @notice determine_majority_blockchain() is a function that takes a vector of blockchain records, hashes each record, 
+  * and determines the majority blockchain based on the most common hash. 
+  * @dev This function is called directly after requesting blockchain records from peers when updating the local blockchain 
+  * to the majority state within update_local_blockchain().
   */
  fn determine_majority_blockchain(blockchains: Vec<BlockChain>) -> Option<BlockChain> {
  
@@ -212,10 +215,8 @@ async fn update_local_blockchain(local_chain: Arc<Mutex<BlockChain>>) {
  
 
 /**
- * @notice listen_for_connections()S is an asynchronous function that listens for incoming connections on the
- * specified address. It will spawn new tasks to handle each incoming connection. This function serves as the 
- * fascilitator of the validation process on the client side for the node software.
- * @dev This function is called by run_validation() and is not intended to be called directly.
+ * @notice listen_for_connections() asynchronously listens for incoming connections on the specified address. It will spawn 
+ * new tasks to handle each incoming connection. Messages to the network are passed of to handle_incoming_message() for processing.
  */
 fn start_listening(validator_node: ValidatorNode) {
     let rt = Runtime::new().unwrap(); // new tokio runtime
@@ -246,9 +247,8 @@ fn start_listening(validator_node: ValidatorNode) {
  }
 
 /**
- * @notice handle_incoming_message() is an asynchronous function that takes a buffer and size, converts the buffer
- * to a string, parses to JSON and then determines which validation function to send the message to. This function
- * is called by listen_for_connections() and is not intended to be called directly.
+ * @notice handle_incoming_message() asynchronously accepts a msg buffer and the current state of the merkle tree 
+ * and blockchain. The buffer is parsed and the next step for the request is determined from the msg contents. 
  */
 async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain>>, merkle_tree: Arc<Mutex<MerkleTree>>) {
     println!("Handling incoming message...\n");
@@ -263,6 +263,7 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
         // Handle Request to Make New Account
         if request["action"] == "make" { 
             
+            // verify the account creation
             match verify_account_creation(request, merkle_tree, blockchain.clone()).await {
                 Ok(public_key) => {
                     println!("Account creation verified for public key: {}", public_key);
@@ -275,6 +276,7 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
         // Handle Request to Make New Transaction
         else if request["action"] == "transaction" { 
 
+            // verify the transaction
             match verify_transaction(request, merkle_tree, blockchain.clone()).await {
                 Ok(success) => {
                     
@@ -292,14 +294,16 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
 
 
 /**
- * 
+ * @notice verify_account_creation() is an asynchronous function that verifies the creation of a new account on the blockchain
+ * network. This function is called by handle_incoming_message() when a new account creation request is received. 
+ * @dev The function will verify the validity of the account creation request, insert the new account into the merkle tree, and 
+ * store the request in the blockchain.
  */
-async fn verify_account_creation(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<String, String> {
+async fn verify_account_creation(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<String, String> { // TODO Simplify/decompose this function
     println!("Verifying account creation...\n");
 
     // retrieve new public key sent with request as Vec<u8> UTF-8 encoded
     let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
-    let public_key_hex_str: String = request["public_key"].as_str().unwrap_or_default().to_string();
     let obfuscated_private_key_hash: Vec<u8> = hex::decode(request["obfuscated_private_key_hash"].as_str().unwrap_or_default()).unwrap();
 
     // Lock the merkle tree
@@ -334,8 +338,13 @@ async fn verify_account_creation(request: Value, merkle_tree: Arc<Mutex<MerkleTr
 }
 
 
-
-async fn verify_transaction(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<bool, String> {
+/**
+ * @notice verify_transaction() is an asynchronous function that verifies a transaction request on the blockchain network.
+ * This function is called by handle_incoming_message() when a new transaction request is received.
+ * @dev The function will verify the validity of the transaction request, update the sender and recipient balances in the
+ * merkle tree, and store the request in the blockchain.
+ */
+async fn verify_transaction(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<bool, String> { // TODO Simplify/decompose this function
     println!("Verifying transaction...\n");
 
     // retrieve transaction details from request
@@ -344,7 +353,7 @@ async fn verify_transaction(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>,
     let amount: u64 = request["amount"].as_str().unwrap_or_default().parse().unwrap_or_default();
 
     // retrieve sender obfuscated private key parts
-    let curve_point1: String = request["sender_obfuscated_private_key_part1"].as_str().unwrap_or_default().to_string();
+    let curve_point1: String = request["sender_obfuscated_private_key_part1"].as_str().unwrap_or_default().to_string(); 
     let curve_point2: String = request["sender_obfuscated_private_key_part2"].as_str().unwrap_or_default().to_string();
 
     // Lock the merkle tree while accessing sender accountinfo
@@ -401,7 +410,11 @@ async fn verify_transaction(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>,
 }
 
 
-// Helper for printing the chain
+/**
+ * @notice print_chain() is an asynchronous function that prints the current state of the blockchain as maintained on the 
+ * client side. This function is called by verify_account_creation() and verify_transaction() after storing the request in the 
+ * blockchain.
+ */
 async fn print_chain(blockchain: Arc<Mutex<BlockChain>>) {
     let blockchain_guard: MutexGuard<'_, BlockChain> = blockchain.lock().await; // lock blockchain for printing
 

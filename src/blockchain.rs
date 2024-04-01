@@ -11,16 +11,17 @@ use serde::{Serialize, Deserialize};
  * There are three types of blocks in the blockchain: Genesis, Transaction, and Account Creation.
  * 
  * Genesis Block: 
- *   The first block in the blockchain. It is hardcoded into the blockchain and contains no data.
+ *    The first block in the blockchain. It is hardcoded into the blockchain and contains no data other than creation 
+ *    time.
  * 
  * Transaction Block:
- *   Tranasaction blocks contain the information revalavant to a single transaction of value between two users. 
- *   This includes the public key of the sender, the public key of the recipient, the amount being transacted,
- *   the timestamp of the transaction, and the hash of all this block data. 
+ *    Tranasaction blocks contain the information revalavant to a single transaction of value between two users. 
+ *    This includes the public key of the sender, the public key of the recipient, the amount being transacted,
+ *    the timestamp of the transaction, and the hash of all this block data. 
  * 
  * Account Creation Block:
- *   Account creation blocks contain the information relevant to the creation of a new account. This includes 
- *   the public key of the new account, the timestamp of the account creation, and the hash of this block data.
+ *    Account creation blocks contain the information relevant to the creation of a new account. This includes 
+ *    the public key of the new account, the timestamp of the account creation, and the hash of this block data.
  */
 
 
@@ -28,10 +29,7 @@ use serde::{Serialize, Deserialize};
  * @notice TransactionRequest structs packages information about a single request to write information to the blockchain.
  * @dev The two types of writing requests are: Transaction and NewAccount.
  * @dev All addresses are stored as UTF-8 encoded byte vectors.
- * @param senderAdress - the Blockchainaddress of the sender.
  * @param senderNonce - the nonce of the sender. (num transactions sender has made).
- * @param recipientAdress - the address of the recipient.
- * @param amount - the amount of the transaction.
 */  
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Request {
@@ -61,7 +59,7 @@ pub enum Block {
 }
 
 /**
- * @notice the Blockchain struct links Blocks int a linked list.
+ * @notice the Blockchain struct links Blocks in a linked list.
  * @param chain - a vector of Blocks that have been added to the blockchain.
  * @param pending_transactions_queue - a queue that stores the public keys of users who have sent transactions to be 
  * added to the blockchain in the order they were recieved into the node. Public keys will be used to retrieve the 
