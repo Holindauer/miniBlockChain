@@ -128,7 +128,7 @@ async fn update_local_blockchain(local_chain: Arc<Mutex<BlockChain>>) {
   * port and collects blockchain records from peer validation nodes. This function is called by update_local_blockchain() and
   * is not intended to be called directly.
   */
- async fn collect_blockchain_records(duration: Duration) -> Result<Vec<BlockChain>, Box<dyn Error>> { // ! TODO Does this ever request the blockchain from the peers?
+ async fn collect_blockchain_records(duration: Duration) -> Result<Vec<BlockChain>, Box<dyn Error>> { // ! TODO Does this ever request the blockchain from the peers? 
  
      // MPSC (multi-producer, single-consumer) channel to collect blockchain records between tasks
      let (tx, mut rx) = mpsc::channel(32); 

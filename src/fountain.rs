@@ -1,6 +1,9 @@
 
 
-
+/**
+ * @notice fountain.rs contains the logic for sending a network request to validator nodes to 
+ *         provide a given public key with a small amount of tokens for transactions.
+ */
 
 
 const PORT_NUMBER: &str = "127.0.0.1:8080"; // TODO figure out how to link thi between src files
@@ -36,7 +39,7 @@ pub fn use_fountain(public_key: &String) {
  * @return a tuple of the secret and public key generated for the new account.
  */
 async fn send_fountain_request(public_key: String) -> Result<(), io::Error> {
-    // println!("\nSending transaction request to network...");
+    println!("\nSending transaction request to network...");
 
     // // Package the message
     // let message: FountainRequest = FountainRequest {

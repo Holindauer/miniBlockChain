@@ -30,7 +30,7 @@ mod zk_proof;
  * 
  *     To send a transaction provide the following arguments to the CLI:
  * 
- *     cargo run [sender private key] [recipiant public key] [transaction amount]
+ *     cargo run transaction [sender private key] [recipiant public key] [transaction amount]
  * 
  *     On the client side, the private key will be converted into an obfuscated representation as multiple ellitpic 
  *     curve points that sum to the elliptic curve representaiton of the original privte key (scalar multiplication). 
