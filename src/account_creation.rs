@@ -18,7 +18,7 @@ use crate::zk_proof::{obfuscate_private_key, hash_obfuscated_private_key};
  * 
  * The following protocol is followed when sending an account creation request:
  * 
- *    First, a private/public key pair is generated using the secp256k1 elliptic curve over a finite field. The public key
+ *    First, a private/public key-pair is generated using the secp256k1 elliptic curve over a finite field. The public key
  *    acts as the address of the account, the private key acts as the password. As well, the private key is multiplied by
  *    the generator point of the curve25519 elliptic curve over a finite field and hashed using sha256. The public key and 
  *    this hash are packaged and sent to validators in the network. The user is responsible for storing the private key, 

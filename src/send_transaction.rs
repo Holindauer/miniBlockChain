@@ -12,12 +12,9 @@ use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT; // generator point
 use curve25519_dalek::scalar::Scalar;
 
 use base64;
-
-use rand::rngs::OsRng; // cryptographically secure RNG
-use rand::RngCore;
-
 use std::io;
-use std::convert::TryInto;
+
+use crate::zk_proof;
 
 
 /**
@@ -103,7 +100,7 @@ async fn send_transaction_request(
     println!("\nSending transaction request to network...");
 
     // Convert the private key to two RistrettoPoints (elliptic curve points)
-    let (point1, point2) = private_key_to_curve_points(&sender_private_key);
+    let (point1, point2) = zk_proof::private_key_to_curve_points(&sender_private_key);
 
     // Base64 encode the points to send over the network
     let encoded_point1: String = base64::encode(point1.compress().to_bytes());
@@ -128,71 +125,3 @@ async fn send_transaction_request(
 }
 
 
-/**
- * @notice private_key_to_curve_points() accepts a private key hexadecimal string. The key is converted to a curve25519_dalek::scalar::Scalar 
- * structure for use with curve25519_dalek eliptic curve operations. A random number generator is used to split the private key into two parts. 
- * Each part is then multiplied by the generator point of the curve25519 elliptic curve over a finite field and returned as a tuple of two 
- * RistrettoPoint structures.
-*/
-pub fn private_key_to_curve_points(private_key: &String) -> (RistrettoPoint, RistrettoPoint) {
-
-    // Convert the private key to a scalar
-    let private_key_bytes: Vec<u8> = hex::decode(private_key).expect("Decoding failed");
-    let private_key_scalar: Scalar = Scalar::from_bits(private_key_bytes.try_into().expect("Invalid length"));
-
-    // Generate a random scalar to split the private key into two parts with
-    let mut rng = OsRng;
-    let mut random_bytes: [u8; 32] = [0u8; 32]; // Array to hold 32 bytes of random data (same length as max scalar value)
-    rng.fill_bytes(&mut random_bytes);
-    let random_scalar: Scalar = Scalar::from_bits(random_bytes);
-
-    // 'Split' the scalar into two parts
-    let scalar_part1: Scalar = private_key_scalar - random_scalar;
-    let scalar_part2: Scalar = random_scalar;
-
-    // Convert to Ristretto points (elliptic curve points)
-    let point1: RistrettoPoint = RISTRETTO_BASEPOINT_POINT * scalar_part1;
-    let point2: RistrettoPoint = RISTRETTO_BASEPOINT_POINT * scalar_part2;
-
-    (point1, point2)
-}
-
-
-
-// Funcs needed for testing
-use crate::account_creation::generate_keypair;
-
-// Tests
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-
-    /**
-     * @test this this verifies that calling the private_key_to_curve_points() function with a private key string generated 
-     * in the same way that the client would generate a private key for a new account, returns two elliptic curve points that 
-     * sum to the original private key when represented as an elliptic curve point (via scalar multiplication).
-     */
-    #[test]
-    fn test_private_key_to_curve_points() {
-        
-        // Generate Keypair and convert to string
-        let (secret_key, _) = generate_keypair().unwrap(); //  (secp256k1::SecretKey type)
-        let secret_key_hex: String = secret_key.to_string();
-
-        // Convert the secret key to two elliptic curve points using the function ebing tested
-        let (point1, point2) = private_key_to_curve_points(&secret_key_hex);
-
-        // Add the two points together
-        let curve_point_sum: RistrettoPoint = point1 + point2;
-
-        // Applly the generator point to the secret original key
-        let original_key_scalar: Scalar = Scalar::from_bits(hex::decode(secret_key_hex).unwrap().try_into().unwrap());
-        let original_key_curve_point = RISTRETTO_BASEPOINT_POINT * original_key_scalar;
-
-        // Check that the sum of the two points is the same as the original key
-        assert_eq!(curve_point_sum.compress(), original_key_curve_point.compress());
-
-
-    }
-}

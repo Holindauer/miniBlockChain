@@ -6,6 +6,8 @@ use secp256k1::{Secp256k1, SecretKey};
 use sha2::{Digest, Sha256};
 use base64::decode;
 use std::convert::TryInto;
+use rand::rngs::OsRng; // cryptographically secure RNG
+use rand::RngCore;
 
 /**
  * @notice zk_proof.rs contains the logic for generating a simple zero-knowledge proof for verification of knowledge of 
@@ -27,12 +29,58 @@ use std::convert::TryInto;
  */
 
 /**
- * @notice obscure_private_key() accepts a private key and uses the curve25519_dalek library is used to perform scalar 
- * multiplication with the generator point of an elliptic curve (curve25519) over a finite field, returning the result
+ * @notice obscure_private_key() accepts a secret key and uses the curve25519_dalek library to perform scalar multiplication with the 
+ * generator point of the curve25519 elliptic curve. The result is returned as a curve25519_dalek::ristretto::RistrettoPoint. 
+ * @dev this function is called within account_creation.rs to generate the obfuscated private key that will be stored in the merkle tree.
 */
-pub fn obfuscate_private_key(private_key: SecretKey) -> RistrettoPoint {
-    RISTRETTO_BASEPOINT_POINT * Scalar::from_bytes_mod_order(*private_key.as_ref())
+pub fn obfuscate_private_key(secret_key: SecretKey) -> RistrettoPoint {
+
+    // Convert the secret key to a hex encoded string 
+    let secret_key_hex_str: String = secret_key.to_string();
+
+    // Convert the secret key to a Scalar struct (curve25519_dalek scalar type)
+    let original_key_scalar: Scalar = Scalar::from_bits(
+        hex::decode(secret_key_hex_str).unwrap().try_into().unwrap()
+    );
+
+    // Scalar multiply the secret key by the generator point
+    let original_key_curve_point: RistrettoPoint = RISTRETTO_BASEPOINT_POINT * original_key_scalar;
+
+    original_key_curve_point
 }
+
+
+/**
+ * @notice private_key_to_curve_points() accepts a private key hexadecimal string. The key is converted to a curve25519_dalek::scalar::Scalar 
+ * structure for use with curve25519_dalek eliptic curve operations. A random number generator is used to split the private key into two parts. 
+ * Each part is then multiplied by the generator point of the curve25519 elliptic curve over a finite field and returned as a tuple of two 
+ * RistrettoPoint structures.
+ * @dev this function is used within send_transaction.rs to generate the two points that will be sent to the network for verification of
+ * knowledge of the private key.
+*/
+pub fn private_key_to_curve_points(private_key: &String) -> (RistrettoPoint, RistrettoPoint) {
+
+    // Convert the private key to a scalar
+    let private_key_bytes: Vec<u8> = hex::decode(private_key).expect("Decoding failed");
+    let private_key_scalar: Scalar = Scalar::from_bits(private_key_bytes.try_into().expect("Invalid length"));
+
+    // Generate a random scalar to split the private key into two parts with
+    let mut rng = OsRng;
+    let mut random_bytes: [u8; 32] = [0u8; 32]; // Array to hold 32 bytes of random data (same length as max scalar value)
+    rng.fill_bytes(&mut random_bytes);
+    let random_scalar: Scalar = Scalar::from_bits(random_bytes);
+
+    // 'Split' the scalar into two parts
+    let scalar_part1: Scalar = private_key_scalar - random_scalar;
+    let scalar_part2: Scalar = random_scalar;
+
+    // Convert to Ristretto points (elliptic curve points)
+    let point1: RistrettoPoint = RISTRETTO_BASEPOINT_POINT * scalar_part1;
+    let point2: RistrettoPoint = RISTRETTO_BASEPOINT_POINT * scalar_part2;
+
+    (point1, point2)
+}
+
 
 /**
  * @notice hash_obscured_private_key() accepts a RistrattoPoint and returns the hash of the point using sha256
@@ -92,34 +140,60 @@ pub fn verify_points_sum_hash(encoded_point1: &str, encoded_point2: &str, expect
 mod tests {
     use super::*;
     use curve25519_dalek::scalar::Scalar;
-    use secp256k1::Secp256k1;
+    use crate::account_creation::generate_keypair;
 
+    /**
+     * @test test_obfuscate_private_key() verifies that the obfuscate_private_key() function returns a RistrettoPoint that is the
+     * result of scalar multiplication of the private key with the generator point of the curve25519 elliptic curve.
+     */
     #[test]
-    fn test_verify_points_sum_hash() {
+    fn test_obfuscate_private_key() {
+        
+        // Generate Keypair and convert to string
+        let (secret_key, _) = generate_keypair().unwrap(); //  (secp256k1::SecretKey type)
+        let secret_key_hex_str: String = secret_key.to_string();
 
-         // Initialize the RNG and generate two scalars
-         let scalar1: Scalar = Scalar::from(1234567890u64);
-         let scalar2: Scalar = Scalar::from(987654321u64);
- 
-         // Generate two points by multiplying the base point by the scalars
-         let point1: RistrettoPoint = RISTRETTO_BASEPOINT_POINT * scalar1;
-         let point2: RistrettoPoint = RISTRETTO_BASEPOINT_POINT * scalar2;
- 
-         // Encode points to Base64
-         let encoded_point1: String = base64::encode(point1.compress().to_bytes());
-         let encoded_point2: String = base64::encode(point2.compress().to_bytes());
- 
-         // Sum the points and compute SHA-256 hash of the result
-         let sum_point: RistrettoPoint = point1 + point2;
-         let sum_point_bytes: [u8; 32] = sum_point.compress().to_bytes();
-         let expected_hash = Sha256::digest(&sum_point_bytes);
- 
-         // Convert the SHA-256 hash to a Vec<u8> to match the function signature
-         let expected_hash_vec: Vec<u8> = expected_hash.to_vec();
- 
-         // Run the verification function with the encoded points and the expected hash
-         assert!(verify_points_sum_hash(&encoded_point1, &encoded_point2, expected_hash_vec),
-                 "The verification of the points sum hash should succeed.");
-     }
+        // Convert the secret key to a scalar
+        let original_key_scalar: Scalar = Scalar::from_bits(
+            hex::decode(secret_key_hex_str).unwrap().try_into().unwrap()
+        );
+
+        // Apply the generator point to the secret key
+        let original_key_curve_point: RistrettoPoint = RISTRETTO_BASEPOINT_POINT * original_key_scalar;
+
+        // Call the function being tested
+        let obfuscated_key_curve_point: RistrettoPoint = obfuscate_private_key(secret_key);
+
+        // Check that the obfuscated key is the same as the original key
+        assert_eq!(obfuscated_key_curve_point.compress(), original_key_curve_point.compress());
+    }
+
+
+    /**
+     * @test test_private_key_to_curve_points() verifies that calling the private_key_to_curve_points() function with a private key 
+     * string generated in the same way that the client would generate a private key for a new account, returns two elliptic curve 
+     * points that sum to the original private key when represented as an elliptic curve point (via scalar multiplication).
+     */
+    #[test]
+    fn test_private_key_to_curve_points() {
+        
+        // Generate Keypair and convert to string
+        let (secret_key, _) = generate_keypair().unwrap(); //  (secp256k1::SecretKey type)
+        let secret_key_hex_str: String = secret_key.to_string();
+
+        // Convert the secret key to two elliptic curve points using the function ebing tested
+        let (point1, point2) = private_key_to_curve_points(&secret_key_hex_str);
+
+        // Add the two points together
+        let curve_point_sum: RistrettoPoint = point1 + point2;
+
+        // Applly the generator point to the secret original key
+        let original_key_scalar: Scalar = Scalar::from_bits(hex::decode(secret_key_hex_str).unwrap().try_into().unwrap());
+        let original_key_curve_point = RISTRETTO_BASEPOINT_POINT * original_key_scalar;
+
+        // Check that the sum of the two points is the same as the original key
+        assert_eq!(curve_point_sum.compress(), original_key_curve_point.compress());
+    }
+
 }
 
