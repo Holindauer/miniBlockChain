@@ -7,6 +7,8 @@ mod send_transaction;
 mod validation;
 mod merkle_tree;
 mod zk_proof;
+mod constants;
+mod fountain;
 
 /**
  * @notice main.rs runs a blockchain node which connects to a TCP server in order to write to the blockchain. 
@@ -106,7 +108,7 @@ fn main() -> std::io::Result<()> {
     } // Fountain Specified
     else if args[1] == "fountain" && args.len() == 2 {
     
-        let public_key: &String = &args[1];
+        let public_key: &String = &args[1]; // TODO implement fountain
     }
     else { // Improper Command
         println!("ERROR! Unrecognized Command");

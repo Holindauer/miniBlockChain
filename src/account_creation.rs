@@ -12,6 +12,7 @@ use secp256k1::{Secp256k1, SecretKey, PublicKey};
 use rand::{thread_rng, RngCore}; // Ensure thread_rng is imported here
 
 use crate::zk_proof::{obfuscate_private_key, hash_obfuscated_private_key};
+use crate::constants::{VERBOSE, PORT_NUMBER};
 
 /**
  * @notice account_creation.rs contains the logic for sending a request to the network to create a new account.
@@ -30,8 +31,6 @@ use crate::zk_proof::{obfuscate_private_key, hash_obfuscated_private_key};
  *    sending transaction requests. 
 */
 
-const PORT_NUMBER: &str = "127.0.0.1:8080"; // TODO figure out how to link thi between src files
-
 /**
  * @notice AccountCreationRequest encapsulate the details of a request to create a new account on the blockchain
  *        network. This includes the public key of the account, the obfuscated elliptic curve private key hash.
@@ -48,14 +47,19 @@ pub struct AccountCreationRequest {
  * the network from the client side for account creation within the network.
  */
 pub fn account_creation() {
+    if VERBOSE { println!("account_creation::account_creation() : Sending account creation request...") };
 
     // Create a new Tokio runtime 
     let rt = tokio::runtime::Runtime::new().unwrap();
 
     // block_on the account creation process, display the results   
     match rt.block_on(send_account_creation_request()) { 
-        Ok(keys) => {
-            println!("Account details sucessfully created: \n\nSecret Key: {:?}, \nPublic Key: {:?}", keys.0.to_string(), keys.1.to_string());
+        Ok(keys) => { // (SecretKey, PublicKey)  // TODO THIS will potentiall need to be another json output for testing, but for now its fine
+            if VERBOSE { 
+                println!("Account details sucessfully created: ");
+                println!("Secret Key: {:?}", keys.0.to_string());
+                println!("Public Key: {:?}", keys.1.to_string());
+            };
         },
         Err(e) => { eprintln!("Account creation failed: {}", e); return; },
     };
@@ -66,7 +70,7 @@ pub fn account_creation() {
  * obfuscated private key hash, and sends the account creation request to the network as a json object.
  */
 async fn send_account_creation_request() -> Result<(SecretKey, PublicKey), io::Error> {
-    println!("\nSending account creation message to network...");
+    if VERBOSE { println!("account_creation::send_account_creation_request() : Sending account creation request...") };
 
     // Generate a new keypair
     let (secret_key, public_key) = generate_keypair()?;
@@ -99,6 +103,7 @@ async fn send_account_creation_request() -> Result<(SecretKey, PublicKey), io::E
  * @return a tuple of the secret and public key generated for the new account.
  */
 pub fn generate_keypair() -> Result<(SecretKey, PublicKey), io::Error> {
+    if VERBOSE { println!("account_creation::generate_keypair() : Generating new keypair...") };
 
     // Create a new secp256k1 context
     let secp = Secp256k1::new();

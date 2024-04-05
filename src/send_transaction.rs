@@ -15,6 +15,7 @@ use base64;
 use std::io;
 
 use crate::zk_proof;
+use crate::constants::{PORT_NUMBER, VERBOSE};
 
 
 /**
@@ -46,9 +47,6 @@ use crate::zk_proof;
  *    group homomorphism present.
  */
 
-
- const PORT_NUMBER: &str = "127.0.0.1:8080"; // TODO figure out how to link thi between src files
-
  /**
   * @notice KeyPair encapsulate a new private and public key generated for a new 
   * blockchain account for the purpose of sending to other nodes in the network.
@@ -69,7 +67,11 @@ use crate::zk_proof;
  * @dev the provided keys are hexadecimal strings and the amount is string integer
  */
 pub fn send_transaction(
-    sender_public_key: &String, sender_private_key: &String, recipient_public_key: &String, amount: &String) { // TODO derive pub key from private key
+    sender_public_key: &String, 
+    sender_private_key: &String, 
+    recipient_public_key: 
+    &String, amount: &String) { // TODO derive pub key from private key
+        if VERBOSE { println!("send_transaction::send_transaction() : Sending transaction request...") };
 
         // Create a new Tokio runtime 
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -81,7 +83,9 @@ pub fn send_transaction(
             recipient_public_key.to_string(), 
             amount.to_string())
         ) 
-        {Ok(_) => { println!("Transaction request sent successfully"); },
+        {Ok(_) => { 
+            if VERBOSE { println!("send_transaction::send_transaction() : Transaction request sent successfully") }; 
+        },
         Err(e) => { eprintln!("Account creation failed: {}", e); return; }, };       
 }   
 
@@ -96,8 +100,7 @@ async fn send_transaction_request(
     recipient_public_key: String, 
     amount: String
 ) -> Result<(), io::Error> {
-
-    println!("\nSending transaction request to network...");
+    if VERBOSE { println!("send_transaction::send_transaction_request() : Sending transaction request...") };
 
     // Convert the private key to two RistrettoPoints (elliptic curve points)
     let (point1, point2) = zk_proof::private_key_to_curve_points(&sender_private_key);

@@ -4,6 +4,8 @@ use std::collections::{HashMap, VecDeque};
 use std::{fs::File, io::{self, Read}, path::Path};
 use serde::{Serialize, Deserialize};
 
+use crate::constants::VERBOSE;
+
 
 
 /**
@@ -83,7 +85,7 @@ impl BlockChain {
 
     // Initialize a new blockchain with a genesis block
     pub fn new() -> Self {
-        println!("Intializing Empty BlockChain...\n");
+        if VERBOSE { println!("Creating new blockchain..."); }
 
         // Create a new blockchain 
         let mut blockchain: BlockChain = BlockChain {
@@ -101,6 +103,7 @@ impl BlockChain {
      * @dev the genesis block contains only the timestamp of the block creation.
      */
     fn create_genesis_block(&mut self) {
+
         let time: u64  = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
         let genesis_block = Block::Genesis {time: time};
         self.chain.push(genesis_block);
@@ -115,7 +118,6 @@ impl BlockChain {
      * added to the joint_transactions_map, using the sender's address as the key.
      */
     pub fn store_incoming_requests(&mut self, request: &Request) {
-        println!("Incoming request stored in blockchain pending requests queue...\n");
 
         // Retrieve and clone relavant address from the request
         let address: Vec<u8> = match &request {
@@ -135,7 +137,6 @@ impl BlockChain {
 
     // Method to create a new block from a request and add it to the blockchain
     pub fn push_request_to_chain(&mut self, request: Request) {
-        println!("Pushing request to blockchain...\n");
     
         let address: Vec<u8>; 
     
@@ -181,6 +182,7 @@ impl BlockChain {
 
     // Sets the hash of a block based on its data
     fn hash_block_data(&mut self, block: &mut Block) {
+
         let mut hasher = Sha256::new(); // new SHA256 hasher
     
         match block { // Contribute block to hasher based on its type
@@ -248,6 +250,8 @@ impl BlockChain {
 
     // Loading the blockchain from a JSON file
     pub fn load_json(&mut self) -> io::Result<()> {
+        if VERBOSE { println!("Loading Blockchain from JSON...\n"); }
+
         // TODO - this function will need to load in an up to date blockchain for the node. This  
         // TODO - will eventually require a network request to a peer to get the latest blockchain.
 
@@ -274,6 +278,7 @@ impl BlockChain {
 
     // Saving the blockchain to a JSON file
     pub fn save_json(&self) -> io::Result<()> {
+
         let file = File::create("BlockChain.json")?;
         serde_json::to_writer_pretty(file, &self.chain)?;
         Ok(())
