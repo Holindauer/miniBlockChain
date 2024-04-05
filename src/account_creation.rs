@@ -11,8 +11,9 @@ extern crate rand;
 use secp256k1::{Secp256k1, SecretKey, PublicKey};
 use rand::{thread_rng, RngCore}; // Ensure thread_rng is imported here
 
+use crate::helper::clear_terminal;
 use crate::zk_proof::{obfuscate_private_key, hash_obfuscated_private_key};
-use crate::constants::{VERBOSE, PORT_NUMBER};
+use crate::constants::{VERBOSE_STACK, VERBOSE_TEST, PORT_NUMBER};
 
 /**
  * @notice account_creation.rs contains the logic for sending a request to the network to create a new account.
@@ -43,11 +44,21 @@ pub struct AccountCreationRequest {
 }
 
 /**
+ * @notice NewAccountDetailsTestOutput encapsulate the details of a new account created on the blockchain 
+ * for the purpose of printing these outputs to terminal during testing for validation/use in other tests
+ */
+#[derive(Serialize, Deserialize)]
+struct NewAccountDetailsTestOutput {
+    secret_key: String,
+    public_key: String,
+}
+
+/**
  * @notice account_creation() is a wrapper called within main.rs that instigates the process of accessing 
  * the network from the client side for account creation within the network.
  */
 pub fn account_creation() {
-    if VERBOSE { println!("account_creation::account_creation() : Sending account creation request...") };
+    if VERBOSE_STACK { println!("account_creation::account_creation() : Sending account creation request...") };
 
     // Create a new Tokio runtime 
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -55,14 +66,46 @@ pub fn account_creation() {
     // block_on the account creation process, display the results   
     match rt.block_on(send_account_creation_request()) { 
         Ok(keys) => { // (SecretKey, PublicKey)  // TODO THIS will potentiall need to be another json output for testing, but for now its fine
-            if VERBOSE { 
-                println!("Account details sucessfully created: ");
-                println!("Secret Key: {:?}", keys.0.to_string());
-                println!("Public Key: {:?}", keys.1.to_string());
-            };
+            
+            if VERBOSE_STACK { // print human readable account details
+                print_human_readable_account_details(&keys.0, &keys.1);
+            }
+            else if VERBOSE_TEST { // print account details for testing in json format
+                print_new_account_details_json(&keys.0.to_string(), &keys.1.to_string());
+            }
         },
         Err(e) => { eprintln!("Account creation failed: {}", e); return; },
     };
+}
+
+/**
+ * @notice print_human_readable_account_details() prints the details of a new account created on the blockchain
+ * network in human readable format.
+ */
+fn print_human_readable_account_details(secret_key: &SecretKey, public_key: &PublicKey) {
+    println!("Account details sucessfully created: ");
+    println!("Secret Key: {:?}", secret_key.to_string());
+    println!("Public Key: {:?}", public_key.to_string());
+}
+
+/**
+ * @notice print_new_account_details_json() prints the details of a new account created on the blockchain
+ * network in JSON format to the terminal for testing purposes.
+ */
+fn print_new_account_details_json(private_key: &String, public_key: &String) {
+
+    // Package the message into a NewAccountDetailsTestOutput struct
+    let message: NewAccountDetailsTestOutput = NewAccountDetailsTestOutput {
+        secret_key: private_key.to_string(),
+        public_key: public_key.to_string(),
+    };
+
+    // Serialize the message to JSON
+    let message_json: String = serde_json::to_string(&message).unwrap();
+
+    // Print the JSON to the terminal
+    clear_terminal();
+    println!("{}", message_json);
 }
 
 /**
@@ -70,7 +113,7 @@ pub fn account_creation() {
  * obfuscated private key hash, and sends the account creation request to the network as a json object.
  */
 async fn send_account_creation_request() -> Result<(SecretKey, PublicKey), io::Error> {
-    if VERBOSE { println!("account_creation::send_account_creation_request() : Sending account creation request...") };
+    if VERBOSE_STACK { println!("account_creation::send_account_creation_request() : Sending account creation request...") };
 
     // Generate a new keypair
     let (secret_key, public_key) = generate_keypair()?;
@@ -103,7 +146,7 @@ async fn send_account_creation_request() -> Result<(SecretKey, PublicKey), io::E
  * @return a tuple of the secret and public key generated for the new account.
  */
 pub fn generate_keypair() -> Result<(SecretKey, PublicKey), io::Error> {
-    if VERBOSE { println!("account_creation::generate_keypair() : Generating new keypair...") };
+    if VERBOSE_STACK { println!("account_creation::generate_keypair() : Generating new keypair...") };
 
     // Create a new secp256k1 context
     let secp = Secp256k1::new();

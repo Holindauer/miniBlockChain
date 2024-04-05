@@ -4,7 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use std::{fs::File, io::{self, Read}, path::Path};
 use serde::{Serialize, Deserialize};
 
-use crate::constants::VERBOSE;
+use crate::constants::VERBOSE_STACK;
 
 
 
@@ -85,7 +85,7 @@ impl BlockChain {
 
     // Initialize a new blockchain with a genesis block
     pub fn new() -> Self {
-        if VERBOSE { println!("Creating new blockchain..."); }
+        if VERBOSE_STACK { println!("Creating new blockchain..."); }
 
         // Create a new blockchain 
         let mut blockchain: BlockChain = BlockChain {
@@ -250,7 +250,6 @@ impl BlockChain {
 
     // Loading the blockchain from a JSON file
     pub fn load_json(&mut self) -> io::Result<()> {
-        if VERBOSE { println!("Loading Blockchain from JSON...\n"); }
 
         // TODO - this function will need to load in an up to date blockchain for the node. This  
         // TODO - will eventually require a network request to a peer to get the latest blockchain.

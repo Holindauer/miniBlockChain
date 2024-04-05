@@ -9,7 +9,7 @@ use std::convert::TryInto;
 use rand::rngs::OsRng; // cryptographically secure RNG
 use rand::RngCore;
 
-use crate::constants::VERBOSE;  
+use crate::constants::VERBOSE_STACK;  
 
 /**
  * @notice zk_proof.rs contains the logic for generating a simple zero-knowledge proof for verification of knowledge of 
@@ -36,7 +36,7 @@ use crate::constants::VERBOSE;
  * @dev this function is called within account_creation.rs to generate the obfuscated private key that will be stored in the merkle tree.
 */
 pub fn obfuscate_private_key(secret_key: SecretKey) -> RistrettoPoint {
-    if VERBOSE { println!("zk_proof::obfuscate_private_key() : Obfuscating Private Key..."); }
+    if VERBOSE_STACK { println!("zk_proof::obfuscate_private_key() : Obfuscating Private Key..."); }
 
     // Convert the secret key to a hex encoded string 
     let secret_key_hex_str: String = secret_key.to_string();
@@ -62,7 +62,7 @@ pub fn obfuscate_private_key(secret_key: SecretKey) -> RistrettoPoint {
  * knowledge of the private key.
 */
 pub fn private_key_to_curve_points(private_key: &String) -> (RistrettoPoint, RistrettoPoint) {
-    if VERBOSE { println!("zk_proof::private_key_to_curve_points() : Converting Private Key to Curve Points..."); }
+    if VERBOSE_STACK { println!("zk_proof::private_key_to_curve_points() : Converting Private Key to Curve Points..."); }
 
     // Convert the private key to a scalar
     let private_key_bytes: Vec<u8> = hex::decode(private_key).expect("Decoding failed");
@@ -90,7 +90,7 @@ pub fn private_key_to_curve_points(private_key: &String) -> (RistrettoPoint, Ris
  * @notice hash_obscured_private_key() accepts a RistrattoPoint and returns the hash of the point using sha256
 */
 pub fn hash_obfuscated_private_key(obscured_private_key: RistrettoPoint) -> Vec<u8> {
-    if VERBOSE { println!("zk_proof::hash_obfuscated_private_key() : Hashing Obfuscated Private Key..."); }
+    if VERBOSE_STACK { println!("zk_proof::hash_obfuscated_private_key() : Hashing Obfuscated Private Key..."); }
 
     let obscured_private_key_bytes: [u8; 32] = obscured_private_key.compress().to_bytes();
     Sha256::digest(&obscured_private_key_bytes).to_vec()
@@ -101,7 +101,7 @@ pub fn hash_obfuscated_private_key(obscured_private_key: RistrettoPoint) -> Vec<
  * @notice decompress_curve_points() accepts two Base64 encoded points and returns the decompressed Ristretto points
  */
 fn decompress_curve_points( encoded_point1: &str, encoded_point2: &str,) -> Result<(RistrettoPoint, RistrettoPoint), &'static str> {
-    if VERBOSE { println!("zk_proof::decompress_curve_points() : Decompressing Curve Points..."); }
+    if VERBOSE_STACK { println!("zk_proof::decompress_curve_points() : Decompressing Curve Points..."); }
 
     // convert encoded points (str) to bytes
     let point1_bytes: Vec<u8> = decode(encoded_point1).map_err(|_| "Failed to decode point 1 from Base64")?;
@@ -125,7 +125,7 @@ fn decompress_curve_points( encoded_point1: &str, encoded_point2: &str,) -> Resu
  * If they do not match, the function returns false.
  */
 pub fn verify_points_sum_hash(encoded_point1: &str, encoded_point2: &str, expected_hash: Vec<u8>) -> bool {
-    if VERBOSE { println!("zk_proof::verify_points_sum_hash() : Verifying Points Sum Hash..."); }
+    if VERBOSE_STACK { println!("zk_proof::verify_points_sum_hash() : Verifying Points Sum Hash..."); }
 
     // convert encoded points (str) to Ristretto points
     let (point1, point2) = decompress_curve_points(encoded_point1, encoded_point2).unwrap();

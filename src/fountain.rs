@@ -2,7 +2,7 @@ use serde::{Serialize, Deserialize};
 use serde_json;
 use std::io;
 
-use crate::constants::{PORT_NUMBER, VERBOSE};
+use crate::constants::{PORT_NUMBER, VERBOSE_STACK};
 
 /**
  * @notice fountain.rs contains the logic for sending a network request to validator nodes to 

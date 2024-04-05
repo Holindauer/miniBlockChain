@@ -15,7 +15,7 @@ use base64;
 use std::io;
 
 use crate::zk_proof;
-use crate::constants::{PORT_NUMBER, VERBOSE};
+use crate::constants::{PORT_NUMBER, VERBOSE_STACK};
 
 
 /**
@@ -71,7 +71,7 @@ pub fn send_transaction(
     sender_private_key: &String, 
     recipient_public_key: 
     &String, amount: &String) { // TODO derive pub key from private key
-        if VERBOSE { println!("send_transaction::send_transaction() : Sending transaction request...") };
+        if VERBOSE_STACK { println!("send_transaction::send_transaction() : Sending transaction request...") };
 
         // Create a new Tokio runtime 
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -84,7 +84,7 @@ pub fn send_transaction(
             amount.to_string())
         ) 
         {Ok(_) => { 
-            if VERBOSE { println!("send_transaction::send_transaction() : Transaction request sent successfully") }; 
+            if VERBOSE_STACK { println!("send_transaction::send_transaction() : Transaction request sent successfully") }; 
         },
         Err(e) => { eprintln!("Account creation failed: {}", e); return; }, };       
 }   
@@ -100,7 +100,7 @@ async fn send_transaction_request(
     recipient_public_key: String, 
     amount: String
 ) -> Result<(), io::Error> {
-    if VERBOSE { println!("send_transaction::send_transaction_request() : Sending transaction request...") };
+    if VERBOSE_STACK { println!("send_transaction::send_transaction_request() : Sending transaction request...") };
 
     // Convert the private key to two RistrettoPoints (elliptic curve points)
     let (point1, point2) = zk_proof::private_key_to_curve_points(&sender_private_key);

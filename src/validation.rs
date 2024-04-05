@@ -9,12 +9,14 @@ use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 use std::error::Error;
 use hex;
+use std::process::Command;
 
 // Import the necessary libraries
 use crate::blockchain::{BlockChain, Request, Block};
 use crate::merkle_tree::{MerkleTree, Account};
 use crate::zk_proof::verify_points_sum_hash;
-use crate::constants::{PORT_NUMBER, VERBOSE, DURATION_GET_PEER_CHAINS};
+use crate::constants::{PORT_NUMBER, VERBOSE_STACK, VERBOSE_TEST, DURATION_GET_PEER_CHAINS};
+use crate::helper::clear_terminal;
 
 /**
  * @notice validation.rs contains the logic for running a validator node. This involves setup and validation steps.
@@ -74,7 +76,7 @@ impl ValidatorNode {
  * the network from the client side for running a validator node.
  */
 pub fn run_validation(private_key: &String) { // TODO implemnt private key/staking idea. Private key to send tokens to
-    if VERBOSE { println!("validation::run_validation() : Booting up validator node..."); }
+    if VERBOSE_STACK { println!("validation::run_validation() : Booting up validator node..."); }
 
     // init validator node struct w/ empty blockchain and merkle tree
     let validator_node: ValidatorNode = ValidatorNode::new();
@@ -95,7 +97,7 @@ pub fn run_validation(private_key: &String) { // TODO implemnt private key/staki
  * when booting up a new validator node.
 */
 async fn update_local_blockchain(local_chain: Arc<Mutex<BlockChain>>) {
-    if VERBOSE { println!("validation::update_local_blockchain() : Accepting blockchain records from peers for {} seconds...", DURATION_GET_PEER_CHAINS.as_secs()); }  // TODO eventually move the blockchain update funcs into a seperate file. validation.rs is getting too big
+    if VERBOSE_STACK { println!("validation::update_local_blockchain() : Accepting blockchain records from peers for {} seconds...", DURATION_GET_PEER_CHAINS.as_secs()); }  // TODO eventually move the blockchain update funcs into a seperate file. validation.rs is getting too big
  
      // Get majority network chain state if available
      match collect_blockchain_records(DURATION_GET_PEER_CHAINS).await {
@@ -111,7 +113,7 @@ async fn update_local_blockchain(local_chain: Arc<Mutex<BlockChain>>) {
                  let mut local_blockchain_guard = local_chain.lock().await;
                  *local_blockchain_guard = majority_chain;
  
-                if VERBOSE { println!("Blockchain updated to majority state of peer validator nodes."); }
+                if VERBOSE_STACK { println!("Blockchain updated to majority state of peer validator nodes."); }
              }
          },
          Err(e) => println!("Error collecting blockchain records: {}", e),
@@ -124,7 +126,7 @@ async fn update_local_blockchain(local_chain: Arc<Mutex<BlockChain>>) {
   * is not intended to be called directly.
   */
  async fn collect_blockchain_records(duration: Duration) -> Result<Vec<BlockChain>, Box<dyn Error>> { // ! TODO Does this ever request the blockchain from the peers? 
-    if VERBOSE { println!("validation::collect_blockchain_records() : Collecting blockchain records from peers..."); }
+    if VERBOSE_STACK { println!("validation::collect_blockchain_records() : Collecting blockchain records from peers..."); }
  
      // MPSC (multi-producer, single-consumer) channel to collect blockchain records between tasks
      let (tx, mut rx) = mpsc::channel(32); 
@@ -164,9 +166,9 @@ async fn update_local_blockchain(local_chain: Arc<Mutex<BlockChain>>) {
 
     // print that none were collected if none were collected
     if rx.recv().await.is_none() {
-        if VERBOSE { println!("validation::collect_blockchain_records() : No blockchain records collected from peers..."); }
+        if VERBOSE_STACK { println!("validation::collect_blockchain_records() : No blockchain records collected from peers..."); }
     }else{
-        if VERBOSE { println!("validation::collect_blockchain_records() : Blockchain records collected from peers..."); }   
+        if VERBOSE_STACK { println!("validation::collect_blockchain_records() : Blockchain records collected from peers..."); }   
     }
  
      // Collect records from the channel
@@ -185,7 +187,7 @@ async fn update_local_blockchain(local_chain: Arc<Mutex<BlockChain>>) {
   * to the majority state within update_local_blockchain().
   */
  fn determine_majority_blockchain(blockchains: Vec<BlockChain>) -> Option<BlockChain> {
-    if VERBOSE { println!("validation::determine_majority_blockchain() : Determining majority blockchain..."); }
+    if VERBOSE_STACK { println!("validation::determine_majority_blockchain() : Determining majority blockchain..."); }
  
      // HashMap to store the hash votes
      let mut hash_votes: HashMap<Vec<u8>, i32> = HashMap::new();
@@ -216,7 +218,7 @@ async fn update_local_blockchain(local_chain: Arc<Mutex<BlockChain>>) {
  * new tasks to handle each incoming connection. Messages to the network are passed of to handle_incoming_message() for processing.
  */
 fn start_listening(validator_node: ValidatorNode) {
-    if VERBOSE { println!("validation::start_listening() : Listening for incoming connections on port {}...", PORT_NUMBER); }
+    if VERBOSE_STACK { println!("validation::start_listening() : Listening for incoming connections on port {}...", PORT_NUMBER); }
 
     let rt = Runtime::new().unwrap(); // new tokio runtime
     
@@ -249,7 +251,7 @@ fn start_listening(validator_node: ValidatorNode) {
  * and blockchain. The buffer is parsed and the next step for the request is determined from the msg contents. 
  */
 async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain>>, merkle_tree: Arc<Mutex<MerkleTree>>) {
-    if VERBOSE { println!("validation::handle_incoming_message() : Handling incoming message...") };
+    if VERBOSE_STACK { println!("validation::handle_incoming_message() : Handling incoming message...") };
 
     // convert the buffer to a string and print
     let msg = String::from_utf8_lossy(&buffer[..buffer.len()]);
@@ -263,8 +265,10 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
             // verify the account creation
             match verify_account_creation(request, merkle_tree, blockchain.clone()).await {
                 Ok(public_key) => {
-                    if VERBOSE { println!("validation::handle_incoming_message() : Account creation verified for public key: {}", public_key) };
-                    print_chain(blockchain).await; // Pass the original blockchain variable
+                    
+                    // if account verified, print chain using the specified verbosity flag
+                    if VERBOSE_TEST { print_most_recent_block_json(blockchain).await; }
+                    else if VERBOSE_STACK { print_chain_human_readable(blockchain).await;}
                 },
                 Err(e) => {eprintln!("Account creation Invalid: {}", e);}
             }
@@ -276,10 +280,16 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
             // verify the transaction
             match verify_transaction(request, merkle_tree, blockchain.clone()).await {
                 Ok(success) => {
-                    
-                    // print success status
-                    if success {println!("Transaction verified!"); print_chain(blockchain).await; }  // TODO HANDLE THE DECISION ABOUT THE VERBOSITY OF THIS DIFFERENTLY.
-                    else { eprintln!("Transaction failed to verify"); } // TODO: Because testing will involve shell scripts reading the printed output, which will soon be json, this should be handled with a VERBOSE_TEST flag instead of VERBOSE
+
+                    // if transaction produces a result (could be success for failure), print he result
+                    if VERBOSE_TEST { 
+                        if success { print_most_recent_block_json(blockchain).await; }
+                        else { eprintln!("Transaction failed to verify"); } // TODO this might need to change to some form of json for testing
+                    }
+                    else if VERBOSE_STACK {
+                        if success { print_chain_human_readable(blockchain).await;}
+                        else { eprintln!("Transaction failed to verify"); }
+                    }                    
                 },
                 Err(e) => {eprintln!("Transaction Validation Error: {}", e);}
             }
@@ -297,7 +307,7 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
  * store the request in the blockchain.
  */
 async fn verify_account_creation(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<String, String> { // TODO Simplify/decompose this function
-    if VERBOSE { println!("validation::verify_account_creation() : Verifying account creation...") };
+    if VERBOSE_STACK { println!("validation::verify_account_creation() : Verifying account creation...") };
 
     // retrieve new public key sent with request as Vec<u8> UTF-8 encoded
     let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
@@ -340,7 +350,7 @@ async fn verify_account_creation(request: Value, merkle_tree: Arc<Mutex<MerkleTr
  * merkle tree, and store the request in the blockchain.
  */
 async fn verify_transaction(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<bool, String> { // TODO Simplify/decompose this function
-    if VERBOSE { println!("validation::verify_transaction() : Verifying transaction...") };
+    if VERBOSE_STACK { println!("validation::verify_transaction() : Verifying transaction...") };
 
     // retrieve transaction details from request
     let sender_address: Vec<u8> = request["sender_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
@@ -405,11 +415,10 @@ async fn verify_transaction(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>,
  * client side. This function is called by verify_account_creation() and verify_transaction() after storing the request in the 
  * blockchain.
  */
-async fn print_chain(blockchain: Arc<Mutex<BlockChain>>) { // TODO // ! figure out how to print this data to terminal such that it can be read in by the shell scripts being used for testing
- // TODO  this could probably be bifurcated into two fucntions. One for human readable, the other for json output, which will be used for testing. The json output should clear the terminal 
- // TODO befor printing the state of the chain
+async fn print_chain_human_readable(blockchain: Arc<Mutex<BlockChain>>) { 
 
-    let blockchain_guard: MutexGuard<'_, BlockChain> = blockchain.lock().await; // lock blockchain for printing
+    // lock blockchain mutex for printing
+    let blockchain_guard: MutexGuard<'_, BlockChain> = blockchain.lock().await; 
 
     println!("\nCurrent State of Blockchain as Maintained on Client Side:");
     for (i, block) in blockchain_guard.chain.iter().enumerate() {
@@ -435,3 +444,27 @@ async fn print_chain(blockchain: Arc<Mutex<BlockChain>>) { // TODO // ! figure o
     }
 }
 
+
+
+/**
+ * @notice print_most_recent_block_json() is an asynchronous function that prints the most recent block pushed to the blockchain
+ * as a JSON object. This function is used for testing purposes and the output is meant to be read by testing shell scripts that 
+ * will compare the output to the expected result.
+ */
+async fn print_most_recent_block_json(blockchain: Arc<Mutex<BlockChain>>){
+
+    // lock blockchain mutex for printing
+    let blockchain_guard: MutexGuard<'_, BlockChain> = blockchain.lock().await; 
+
+    // retrieve the most recent block
+    let most_recent_block: &Block = blockchain_guard.chain.last().unwrap();
+
+    // convert block to json string
+    let block_json: String = serde_json::to_string(most_recent_block).unwrap();
+
+    // clear terminal and print block
+    clear_terminal();
+    println!("{}", block_json);
+
+
+}
