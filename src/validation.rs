@@ -415,7 +415,9 @@ async fn verify_transaction(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>,
  * client side. This function is called by verify_account_creation() and verify_transaction() after storing the request in the 
  * blockchain.
  */
-async fn print_chain(blockchain: Arc<Mutex<BlockChain>>) {
+async fn print_chain(blockchain: Arc<Mutex<BlockChain>>) { // TODO // ! figure out how to print this data to terminal such that it can be read in by the shell scripts being used for testing
+
+
     let blockchain_guard: MutexGuard<'_, BlockChain> = blockchain.lock().await; // lock blockchain for printing
 
     println!("\nCurrent State of Blockchain as Maintained on Client Side:");
@@ -425,7 +427,7 @@ async fn print_chain(blockchain: Arc<Mutex<BlockChain>>) {
                 // Directly use address as it's already a UTF-8 encoded hex string
                 let hash_hex = hex::encode(hash); // Assuming hash is a Vec<u8> needing encoding
                 let address = String::from_utf8(address.clone()).unwrap();
-                println!("\nBlock {}: \n\tNew Account: {:?}\n\tTime: {}\n\tHash: {}", i, address, time, hash_hex);
+                println!("\nBlock {}: \n\tNew Account: {}\n\tTime: {}\n\tHash: {}", i, address, time, hash_hex);
             },
             Block::Transaction { sender, sender_nonce, recipient, amount, time, hash } => {
                 // Directly use sender and recipient as they're already UTF-8 encoded hex strings

@@ -10,3 +10,10 @@ The src director contains the implementation of the validator node with three ba
 - Create an account
 - Send a transaction
 
+
+
+Testing Dependencies 
+
+    sudo apt-get update
+    sudo apt-get install xterm
+ 
