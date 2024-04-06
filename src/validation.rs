@@ -4,6 +4,7 @@ use tokio::net::TcpListener;
 use tokio::io::AsyncReadExt;
 use tokio::runtime::Runtime;
 use serde_json::Value;
+use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
@@ -15,7 +16,7 @@ use std::process::Command;
 use crate::blockchain::{BlockChain, Request, Block};
 use crate::merkle_tree::{MerkleTree, Account};
 use crate::zk_proof::verify_points_sum_hash;
-use crate::constants::{PORT_NUMBER, VERBOSE_STACK, VERBOSE_TEST, DURATION_GET_PEER_CHAINS};
+use crate::constants::{PORT_NUMBER, VERBOSE_STACK, INTEGRATION_TEST, DURATION_GET_PEER_CHAINS};
 use crate::helper::clear_terminal;
 
 /**
@@ -266,9 +267,11 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
             match verify_account_creation(request, merkle_tree, blockchain.clone()).await {
                 Ok(public_key) => {
                     
-                    // if account verified, print chain using the specified verbosity flag
-                    if VERBOSE_TEST { print_most_recent_block_json(blockchain).await; }
-                    else if VERBOSE_STACK { print_chain_human_readable(blockchain).await;}
+                    // upon succesfull account creation, print blockchain state
+                    if VERBOSE_STACK { print_chain_human_readable(blockchain.clone()).await;}
+
+                    // if doing an integration test, save the most recent block as a json file
+                    if INTEGRATION_TEST { save_most_recent_block_json(blockchain.clone()).await; }  
                 },
                 Err(e) => {eprintln!("Account creation Invalid: {}", e);}
             }
@@ -281,15 +284,16 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
             match verify_transaction(request, merkle_tree, blockchain.clone()).await {
                 Ok(success) => {
 
-                    // if transaction produces a result (could be success for failure), print he result
-                    if VERBOSE_TEST { 
-                        if success { print_most_recent_block_json(blockchain).await; }
-                        else { eprintln!("Transaction failed to verify"); } // TODO this might need to change to some form of json for testing
-                    }
-                    else if VERBOSE_STACK {
-                        if success { print_chain_human_readable(blockchain).await;}
+                    if VERBOSE_STACK {
+                        if success { print_chain_human_readable(blockchain.clone()).await;}
                         else { eprintln!("Transaction failed to verify"); }
-                    }                    
+                    }                       
+
+                    // 
+                    if INTEGRATION_TEST { 
+                        if success { save_most_recent_block_json(blockchain.clone()).await; }
+                        else { eprintln!("Transaction failed to verify"); } // TODO this might need to change to some form of json for testing
+                     } 
                 },
                 Err(e) => {eprintln!("Transaction Validation Error: {}", e);}
             }
@@ -424,12 +428,14 @@ async fn print_chain_human_readable(blockchain: Arc<Mutex<BlockChain>>) {
     for (i, block) in blockchain_guard.chain.iter().enumerate() {
         match block {
             Block::NewAccount { address, time, hash } => {
+                
                 // Directly use address as it's already a UTF-8 encoded hex string
                 let hash_hex = hex::encode(hash); // Assuming hash is a Vec<u8> needing encoding
                 let address = String::from_utf8(address.clone()).unwrap();
                 println!("\nBlock {}: \n\tNew Account: {}\n\tTime: {}\n\tHash: {}", i, address, time, hash_hex);
             },
             Block::Transaction { sender, sender_nonce, recipient, amount, time, hash } => {
+
                 // Directly use sender and recipient as they're already UTF-8 encoded hex strings
                 let hash_hex = hex::encode(hash); // Assuming hash is a Vec<u8> needing encoding
                 let sender = String::from_utf8(sender.clone()).unwrap();
@@ -445,26 +451,58 @@ async fn print_chain_human_readable(blockchain: Arc<Mutex<BlockChain>>) {
 }
 
 
+/**
+ * @notice save_most_recent_block_json() is an asynchronous function that saves the most recent block in the 
+ * blockchain as a JSON file. This function is used to save the most recent block during integration testing.
+ */
+#[derive(Serialize)]
+#[serde(untagged)]
+enum BlockJson {
+    Genesis {
+        time: u64,
+    },
+    Transaction {
+        sender: String,
+        recipient: String,
+        amount: u64,
+        time: u64,
+        sender_nonce: u64,
+        hash: String,
+    },
+    NewAccount {
+        address: String,
+        time: u64,
+        hash: String,
+    },
+}
 
 /**
- * @notice print_most_recent_block_json() is an asynchronous function that prints the most recent block pushed to the blockchain
- * as a JSON object. This function is used for testing purposes and the output is meant to be read by testing shell scripts that 
- * will compare the output to the expected result.
+ * @notice save_most_recent_block_json() is an asynchronous function that saves the most recent block in the
+ * blockchain as a JSON file. This function is used to save the most recent block during integration testing.
  */
-async fn print_most_recent_block_json(blockchain: Arc<Mutex<BlockChain>>){
+async fn save_most_recent_block_json(blockchain: Arc<Mutex<BlockChain>>) {
+    let blockchain_guard: MutexGuard<'_, BlockChain> = blockchain.lock().await;
 
-    // lock blockchain mutex for printing
-    let blockchain_guard: MutexGuard<'_, BlockChain> = blockchain.lock().await; 
-
-    // retrieve the most recent block
-    let most_recent_block: &Block = blockchain_guard.chain.last().unwrap();
-
-    // convert block to json string
-    let block_json: String = serde_json::to_string(most_recent_block).unwrap();
-
-    // clear terminal and print block
-    clear_terminal();
-    println!("{}", block_json);
-
-
+    if let Some(most_recent_block) = blockchain_guard.chain.last() {
+        let block_json = match most_recent_block {
+            Block::Genesis { time } => BlockJson::Genesis { time: *time },
+            Block::Transaction { sender, recipient, amount, time, sender_nonce, hash } => BlockJson::Transaction {
+                sender: String::from_utf8(sender.clone()).unwrap_or_default(),
+                recipient: String::from_utf8(recipient.clone()).unwrap_or_default(),
+                amount: *amount,
+                time: *time,
+                sender_nonce: *sender_nonce,
+                hash: hex::encode(hash),
+            },
+            Block::NewAccount { address, time, hash } => BlockJson::NewAccount {
+                address: String::from_utf8(address.clone()).unwrap_or_default(),
+                time: *time,
+                hash: hex::encode(hash),
+            },
+        };
+        let message_json = serde_json::to_string(&block_json).unwrap();
+        std::fs::write("most_recent_block.json", message_json).unwrap();
+    } else {
+        eprintln!("Blockchain is empty.");
+    }
 }

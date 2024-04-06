@@ -8,7 +8,7 @@ mod constants;
 mod fountain;
 mod helper;
 
-use crate::constants::{VERBOSE_STACK, VERBOSE_TEST};
+use crate::constants::{VERBOSE_STACK};
 use validation::run_validation;
 use std::env;
 /**
@@ -69,11 +69,6 @@ use std::env;
  */
 
 fn main() -> std::io::Result<()> {
-    
-    // ensure VERBOSE_TEST and VERBOSE_STACK dont equal each other. Testing requires clear terminal output
-    if VERBOSE_TEST == true && VERBOSE_STACK == true {
-        println!("ERROR! VERBOSE_TEST and VERBOSE_STACK cannot both be true"); return Ok(());
-    }
 
     // read CLI args into vector
     let args: Vec<String> = env::args().collect();

@@ -13,7 +13,7 @@ use rand::{thread_rng, RngCore}; // Ensure thread_rng is imported here
 
 use crate::helper::clear_terminal;
 use crate::zk_proof::{obfuscate_private_key, hash_obfuscated_private_key};
-use crate::constants::{VERBOSE_STACK, VERBOSE_TEST, PORT_NUMBER};
+use crate::constants::{INTEGRATION_TEST, PORT_NUMBER, VERBOSE_STACK};
 
 /**
  * @notice account_creation.rs contains the logic for sending a request to the network to create a new account.
@@ -65,14 +65,13 @@ pub fn account_creation() {
 
     // block_on the account creation process, display the results   
     match rt.block_on(send_account_creation_request()) { 
-        Ok(keys) => { // (SecretKey, PublicKey)  // TODO THIS will potentiall need to be another json output for testing, but for now its fine
+        Ok(keys) => { // (SecretKey, PublicKey)  
             
-            if VERBOSE_STACK { // print human readable account details
-                print_human_readable_account_details(&keys.0, &keys.1);
-            }
-            else if VERBOSE_TEST { // print account details for testing in json format
-                print_new_account_details_json(&keys.0.to_string(), &keys.1.to_string());
-            }
+            // Upon successful account creation, print the account details
+            if VERBOSE_STACK { print_human_readable_account_details(&keys.0, &keys.1); }
+
+            // If integration testing is enabled, save the account details to a json file for retrieval
+            if INTEGRATION_TEST { save_new_account_details_json(&keys.0.to_string(), &keys.1.to_string()); }
         },
         Err(e) => { eprintln!("Account creation failed: {}", e); return; },
     };
@@ -89,10 +88,10 @@ fn print_human_readable_account_details(secret_key: &SecretKey, public_key: &Pub
 }
 
 /**
- * @notice print_new_account_details_json() prints the details of a new account created on the blockchain
- * network in JSON format to the terminal for testing purposes.
+ * @notice save_new_account_details_json() saves a json string of the details of a new account created on the blockchain
+ * network to the terminal. This is used during integration testing to save the output of the account creation process.
  */
-fn print_new_account_details_json(private_key: &String, public_key: &String) {
+fn save_new_account_details_json(private_key: &String, public_key: &String) {
 
     // Package the message into a NewAccountDetailsTestOutput struct
     let message: NewAccountDetailsTestOutput = NewAccountDetailsTestOutput {
@@ -100,12 +99,9 @@ fn print_new_account_details_json(private_key: &String, public_key: &String) {
         public_key: public_key.to_string(),
     };
 
-    // Serialize the message to JSON
+    // Save the account details to a json file
     let message_json: String = serde_json::to_string(&message).unwrap();
-
-    // Print the JSON to the terminal
-    clear_terminal();
-    println!("{}", message_json);
+    std::fs::write("new_account_details.json", message_json).unwrap();
 }
 
 /**

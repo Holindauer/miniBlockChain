@@ -12,8 +12,8 @@ The src director contains the implementation of the validator node with three ba
 
 
 
-Testing Dependencies 
+Integration Testing Dependencies 
 
-    sudo apt-get update
-    sudo apt-get install xterm
+    xterm
+    jq
  

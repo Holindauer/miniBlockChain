@@ -55,9 +55,22 @@ pub enum Request {
 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Block {
-    Genesis { time : u64},
-    Transaction { sender: Vec<u8>, recipient: Vec<u8>, amount: u64, time : u64, sender_nonce: u64, hash: Vec<u8>},
-    NewAccount { address: Vec<u8>, time: u64, hash: Vec<u8>},
+    Genesis { 
+        time : u64
+    },
+    Transaction { 
+        sender: Vec<u8>, 
+        recipient: Vec<u8>, 
+        amount: u64, 
+        time : u64, 
+        sender_nonce: u64, 
+        hash: Vec<u8>
+    },
+    NewAccount { 
+        address: Vec<u8>, 
+        time: u64, 
+        hash: Vec<u8>
+    },
 }
 
 /**
