@@ -7,6 +7,7 @@ mod zk_proof;
 mod constants;
 mod fountain;
 mod helper;
+mod get_consensus;
 
 use std::env;
 /**
