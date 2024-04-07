@@ -8,8 +8,6 @@ mod constants;
 mod fountain;
 mod helper;
 
-use crate::constants::{VERBOSE_STACK};
-use validation::run_validation;
 use std::env;
 /**
  * @notice main.rs runs a blockchain node which connects to a TCP server in order to write to the blockchain. 
@@ -78,7 +76,6 @@ fn main() -> std::io::Result<()> {
 
         // send account creation request to validator nodes
         account_creation::account_creation();
-        return Ok(());
 
     } // Transaction Specified
     else if args[1] == "transaction" && args.len() == 6{  // TODO remove the need to provide the public key by using the private key to find the public key
@@ -104,12 +101,13 @@ fn main() -> std::io::Result<()> {
         let private_key: &String = &args[2];
         
         // Run node as a validator
-        run_validation(private_key);
+        validation::run_validation(private_key);
 
     } // Fountain Specified
     else if args[1] == "fountain" && args.len() == 2 {
     
-        let public_key: &String = &args[1]; // TODO implement fountain
+        let public_key: &String = &args[1]; 
+        fountain::use_fountain(public_key);
     }
     else { // Improper Command
         println!("ERROR! Unrecognized Command");

@@ -3,19 +3,17 @@
 # This script contains an integration test for sending a transaction between two newly created
 # accounts. It will create two new accounts, save their public and private key information, and 
 # send an intitial transaction of zero tokens between each account. 
-
+#
 # Ensure that the INTEGRATION_TEST flag is set to true in constants.rs before running this script.
 
-
-
 # Open a new terminal and run validator node
-xterm -hold -e "bash -c './run_validation.sh'" &
+xterm -hold -e "bash -c 'cargo run validate private_key'" &
 
 # Wait for the validator node to initialize
-sleep 5
+sleep 3
 
 # Execute the script to create a new account and redirect output to a file
-./make_new_account.sh
+cargo run make
 
 # Wait for the account creation json file to be created by the make_new_account.sh script
 if [ -f "./new_account_details.json" ]; then
@@ -30,7 +28,7 @@ fi
 rm -f ./new_account_details.json
 
 # Create another account
-./make_new_account.sh
+cargo run make 
 
 sleep 2
 
@@ -55,7 +53,9 @@ secret_key_2=$(echo $account_2_json | jq -r '.secret_key')
 public_key_2=$(echo $account_2_json | jq -r '.public_key')
 
 # send transaction from account 1 to account 2
-./send_transaction.sh $public_key_1 $secret_key_1 $public_key_2 0
+echo
+echo "Sending transaction from account 1 to account 2..."
+cargo run -- transaction "$public_key_1" "$secret_key_1" "$public_key_2" 0
 
 # Check for most_recent_block.json file
 if [ -f "./most_recent_block.json" ]; then
@@ -74,10 +74,12 @@ recipient=$(echo $most_recent_block_json | jq -r '.recipient')
 
 
 # remove the most_recent_block.json file now that we have the information
-# rm -f ./most_recent_block.json
-
+rm -f ./most_recent_block.json
 
 clear
+
+# stop the validator node
+killall xterm
 
 # print both account jsons
 echo "Account 1 JSON: $account_1_json"
@@ -92,15 +94,11 @@ echo "Block Recipient: $recipient"
 
 # Check that the information in the block matches the transaction
 if [ "$amount" -eq 0 ] && [ "$sender_nonce" -eq 1 ] && [ "$sender" == "$public_key_1" ] && [ "$recipient" == "$public_key_2" ]; then
+    echo
     echo "Transaction test passed."
+    exit 0 # return success
 else
+    echo
     echo "Transaction test failed."
+    exit 1 # return failure
 fi
-
-
-# release the validator node
-killall xterm
-
-echo "Transaction test passed."
-
-exit 0

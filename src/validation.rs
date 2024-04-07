@@ -291,8 +291,8 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
 
                     // 
                     if INTEGRATION_TEST { 
-                        if success { save_most_recent_block_json(blockchain.clone()).await; }
-                        else { eprintln!("Transaction failed to verify"); } // TODO this might need to change to some form of json for testing
+                        save_most_recent_block_json(blockchain.clone()).await;
+                        if !success { save_failed_transaction_json().await; }
                      } 
                 },
                 Err(e) => {eprintln!("Transaction Validation Error: {}", e);}
@@ -505,4 +505,16 @@ async fn save_most_recent_block_json(blockchain: Arc<Mutex<BlockChain>>) {
     } else {
         eprintln!("Blockchain is empty.");
     }
+}
+
+
+/**
+ * @noticd save_failed_transaction_json() is an async function that saves the most recent failed transaction as a
+ * JSON file. This function is used to save the most recent failed transaction during integration testing.
+ */
+async fn save_failed_transaction_json(){
+
+    // save a simple json file that just contains the number 1 for failed transaction
+    let message_json = serde_json::to_string(&1).unwrap();
+    std::fs::write("failed_transaction.json", message_json).unwrap();
 }
