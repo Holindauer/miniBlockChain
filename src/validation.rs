@@ -12,7 +12,7 @@ use hex;
 use crate::blockchain::{BlockChain, Request, Block};
 use crate::merkle_tree::{MerkleTree, Account};
 use crate::zk_proof::verify_points_sum_hash;
-use crate::constants::{PORT_NUMBER, VERBOSE_STACK, INTEGRATION_TEST};
+use crate::constants::{PORT_NUMBER, VERBOSE_STACK, INTEGRATION_TEST, FAUCET_AMOUNT};
 use crate::get_consensus::update_local_blockchain;
 
 /**
@@ -83,7 +83,7 @@ pub fn run_validation(private_key: &String) { // TODO implemnt private key/staki
 
     // clone the blockchain and merkle tree Arc<Mutex> values
     let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();
-    let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
+    let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone(); // TODO also update the merkle tree at bootup
 
     // send request to peers to update to network majority blockchain state. 
     rt.block_on(async move { update_local_blockchain(blockchain).await; });
@@ -162,12 +162,13 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
             match verify_transaction(request, merkle_tree, blockchain.clone()).await {
                 Ok(success) => {
 
+                    // upon succesfull transaction, print blockchain state
                     if VERBOSE_STACK {
                         if success { print_chain_human_readable(blockchain.clone()).await;}
                         else { eprintln!("Transaction failed to verify"); }
                     }                       
 
-                    // 
+                    // if doing an integration test, save the most recent block as a json file
                     if INTEGRATION_TEST { 
                         save_most_recent_block_json(blockchain.clone()).await;
                         if !success { save_failed_transaction_json().await; }
@@ -176,6 +177,18 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
                 Err(e) => {eprintln!("Transaction Validation Error: {}", e);}
             }
         } 
+        // Handle Request to Use Faucet
+        else if request["action"] == "faucet" { 
+            
+            // verify the faucet request
+            match verify_faucet_request(request, merkle_tree, blockchain.clone()).await {
+                Ok(_) => { 
+                    if VERBOSE_STACK { print_chain_human_readable(blockchain.clone()).await;} 
+                    if INTEGRATION_TEST { save_most_recent_block_json(blockchain.clone()).await; }
+                },
+                Err(e) => { eprintln!("Faucet request failed: {}", e); }
+            }
+        }
 
     else { eprintln!("Unrecognized action: {}", request["action"]);}
     } else {eprintln!("Failed to parse message: {}", msg);}
@@ -293,6 +306,45 @@ async fn verify_transaction(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>,
 
 
 /**
+ * @notice verify_faucet_request() is an asynchronous function that verifies a faucet request on the blockchain network.
+ * This results in an account balance increase of FAUCET_AMOUNT for the provided public key. This function is called by 
+ * handle_incoming_message() when a new faucet request is received.
+ */
+async fn verify_faucet_request(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<(), String> {
+    if VERBOSE_STACK { println!("validation::verify_faucet_request() : Verifying faucet request...") };
+
+    // Check that the account exist
+    let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
+
+    // Lock the merkle tree
+    let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
+
+    // Check that the account doesnt already exist in the tree
+    if !merkle_tree_guard.account_exists(public_key.clone()) { 
+        return Err("Cannot Supply Funds to Non-Existence Account".to_string());
+    }
+
+    // get the account balance and update it
+    let account_balance: u64 = merkle_tree_guard.get_account_balance(public_key.clone()).unwrap();
+    let new_balance: u64 = account_balance + FAUCET_AMOUNT;
+
+    // update the account balance
+    merkle_tree_guard.change_balance(public_key.clone(), new_balance);
+
+
+    // Update the blockchain with the faucet request
+    let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let new_account_request: Request = Request::Faucet { address: public_key, time: time, };
+    
+    // store and validate the request
+    let mut blockchain_guard: MutexGuard<BlockChain> = blockchain.lock().await;
+    blockchain_guard.store_incoming_requests(&new_account_request);
+    blockchain_guard.push_request_to_chain(new_account_request);
+
+    Ok(())
+}
+
+/**
  * @notice print_chain() is an asynchronous function that prints the current state of the blockchain as maintained on the 
  * client side. This function is called by verify_account_creation() and verify_transaction() after storing the request in the 
  * blockchain.
@@ -323,6 +375,13 @@ async fn print_chain_human_readable(blockchain: Arc<Mutex<BlockChain>>) {
             },
             Block::Genesis { time } => {
                 println!("\nBlock {}: \n\tGenesis Block\n\tTime: {:?}", i, time);
+            },
+            Block::Faucet { address, time, hash } => {
+                
+                // Directly use address as it's already a UTF-8 encoded hex string
+                let hash_hex = hex::encode(hash); // Assuming hash is a Vec<u8> needing encoding
+                let address = String::from_utf8(address.clone()).unwrap();
+                println!("\nBlock {}: \n\tFaucet Request: {}\n\tTime: {}\n\tHash: {}", i, address, time, hash_hex);
             },
         }
     }
@@ -373,6 +432,11 @@ async fn save_most_recent_block_json(blockchain: Arc<Mutex<BlockChain>>) {
                 hash: hex::encode(hash),
             },
             Block::NewAccount { address, time, hash } => BlockJson::NewAccount {
+                address: String::from_utf8(address.clone()).unwrap_or_default(),
+                time: *time,
+                hash: hex::encode(hash),
+            },
+            Block::Faucet { address, time, hash } => BlockJson::NewAccount {
                 address: String::from_utf8(address.clone()).unwrap_or_default(),
                 time: *time,
                 hash: hex::encode(hash),

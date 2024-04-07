@@ -45,6 +45,10 @@ pub enum Request {
     NewAccount {
         new_address: Vec<u8>,
         time: u64,
+    },
+    Faucet {
+        address: Vec<u8>,
+        time: u64,
     }
 }
 
@@ -53,7 +57,7 @@ pub enum Request {
   * @dev The Block enum is used to store the data of the block and differentiate between the different types of blocks.
   * @dev All addresses are stored as UTF-8 encoded byte vectors.
 */
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)] // TODO update block info to include account balances
 pub enum Block {
     Genesis { 
         time : u64
@@ -71,6 +75,11 @@ pub enum Block {
         time: u64, 
         hash: Vec<u8>
     },
+    Faucet { 
+        address: Vec<u8>, 
+        time: u64, 
+        hash: Vec<u8>
+    }
 }
 
 /**
@@ -136,6 +145,7 @@ impl BlockChain {
         let address: Vec<u8> = match &request {
             Request::Transaction { sender_address, .. } => sender_address,
             Request::NewAccount { new_address, .. } => new_address,
+            Request::Faucet { address, .. } => address,
         }.clone();
     
         // Push the address to the pending request queue
@@ -150,43 +160,58 @@ impl BlockChain {
 
     // Method to create a new block from a request and add it to the blockchain
     pub fn push_request_to_chain(&mut self, request: Request) {
-    
-        let address: Vec<u8>; 
-    
-        // Create Block from request
-        let mut block: Block = match &request { // Borrow `request` here instead of moving it
-            // package transaction block
-            Request::Transaction { sender_address, recipient_address, amount, time, sender_nonce } => {
-                let hash: Vec<u8> = Vec::new();
-                address = sender_address.clone(); // Clone the address here for later use
+        
+        // init hash for block
+        let hash: Vec<u8> = Vec::new();
 
-                // return the new transaction block
-                Block::Transaction {
+        // Create Block from request
+        let (address, mut block): (Vec<u8>, Block) = match &request {
+
+            // package transaction request data into a block
+            Request::Transaction { sender_address, recipient_address, amount, time, sender_nonce } => {
+
+                // return tup w/ address and new block
+                (sender_address.clone(), Block::Transaction {
                     sender: sender_address.clone(), 
                     recipient: recipient_address.clone(), 
-                    amount: *amount as u64,  // * dereferences the amount to get the value
+                    amount: *amount,  
                     time: *time, 
                     sender_nonce: *sender_nonce, 
                     hash 
-                }
+                })
             },
-    
-            // package new account block
+            // package new account request data into a block
             Request::NewAccount { new_address, time } => {
-                let hash: Vec<u8> = Vec::new();
-                address = new_address.clone(); // Clone the address here for later use
-                Block::NewAccount { address: new_address.clone(), time: *time, hash }
+
+                // return tup w/ address and new block
+                (new_address.clone(), Block::NewAccount { 
+                    address: new_address.clone(), 
+                    time: *time, 
+                    hash 
+                })
+            },
+
+            // package faucet request data into a block
+            Request::Faucet { address, time } => {
+
+                // return tup w/ address and new block
+                (address.clone(), Block::Faucet { 
+                    address: address.clone(), 
+                    time: *time, 
+                    hash 
+                })
             },
         };
-        self.hash_block_data(&mut block); // set the hash of the block
-        
+
+        // Set the hash of the block
+        self.hash_block_data(&mut block);
 
         // Push the new block to the blockchain
         self.chain.push(block);    
         self.pending_request_queue.pop_front(); // Remove leading address from the queue
     
         // retrieve mutable vector of all requests from the sender
-        if let Some(requests) = self.joint_request_map.get_mut(&address) {
+        if let Some(requests) = self.joint_request_map.get_mut(&address) {             
 
             // Remove the request from requests Vec that matches the one added to the blockchain
             if let Some(index) = requests.iter().position(|r| *r == request) { requests.remove(index); }
@@ -210,6 +235,10 @@ impl BlockChain {
                 hasher.update(sender_nonce.to_string().as_bytes());
             }
             Block::NewAccount { address, time, .. } => {
+                hasher.update(address);
+                hasher.update(time.to_string().as_bytes());
+            }
+            Block::Faucet { address, time, .. } => {
                 hasher.update(address);
                 hasher.update(time.to_string().as_bytes());
             }
@@ -250,6 +279,11 @@ impl BlockChain {
                     hasher.update(hash);
                 }
                 Block::NewAccount { address, time, hash } => {
+                    hasher.update(address);
+                    hasher.update(time.to_string().as_bytes());
+                    hasher.update(hash);
+                }
+                Block::Faucet { address, time, hash } => {
                     hasher.update(address);
                     hasher.update(time.to_string().as_bytes());
                     hasher.update(hash);

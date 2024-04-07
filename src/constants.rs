@@ -16,3 +16,6 @@ pub const VERBOSE_STACK: bool = true; // stack processes
 
 // TEST controls whether to save json block updates during integration testing
 pub const INTEGRATION_TEST: bool = true;
+
+// amount of tokens to send to accounts when a faucet request is made
+pub const FAUCET_AMOUNT: u64 = 100; 

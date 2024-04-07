@@ -75,6 +75,9 @@ fi
 # extract the information from the most_recent_block.json file
 failed_transaction=$(jq '.' failed_transaction.json)
 
+# Remove the file after reading
+rm -f ./failed_transaction.json
+rm -f ./most_recent_block.jsonS
 
 # Check the value
 if [ "$failed_transaction" -eq 1 ]; then
@@ -84,3 +87,4 @@ else
     echo "No failed transaction detected."
     exit 1 # failure
 fi
+

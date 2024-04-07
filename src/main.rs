@@ -5,7 +5,7 @@ mod validation;
 mod merkle_tree;
 mod zk_proof;
 mod constants;
-mod fountain;
+mod faucet;
 mod helper;
 mod get_consensus;
 
@@ -61,9 +61,9 @@ use std::env;
  *     Once a node has connected, it will begin to listen for incoming transactions and account creations. The logic 
  *     of the above described processes will be fasciliated by the node software.  
  * 
- * 4.) Fountain: 
+ * 4.) Faucet: 
  *     
- *     Using the fountain command will send a network request to validator nodes to provide a given public key with a 
+ *     Using the faucet command will send a network request to validator nodes to provide a given public key with a 
  *     small amount of tokens that can be used to send transactions with. This is for testing purposes.
  */
 
@@ -104,11 +104,11 @@ fn main() -> std::io::Result<()> {
         // Run node as a validator
         validation::run_validation(private_key);
 
-    } // Fountain Specified
-    else if args[1] == "fountain" && args.len() == 2 {
+    } // Faucet Specified
+    else if args[1] == "faucet" && args.len() == 3 {
     
-        let public_key: &String = &args[1]; 
-        fountain::use_fountain(public_key);
+        let public_key: &String = &args[2]; 
+        faucet::use_faucet(public_key);
     }
     else { // Improper Command
         println!("ERROR! Unrecognized Command");
