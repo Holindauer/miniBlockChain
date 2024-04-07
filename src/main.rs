@@ -7,7 +7,7 @@ mod zk_proof;
 mod constants;
 mod faucet;
 mod helper;
-mod get_consensus;
+mod chain_consensus;
 
 use std::env;
 /**

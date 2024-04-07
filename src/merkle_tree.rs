@@ -88,6 +88,11 @@ impl MerkleTree {
         self.accounts_vec.iter().find(|account| account.public_key == public_key).cloned()
     }
 
+    // Returns an accounts private key hash
+    pub fn get_private_key_hash(&self, public_key: Vec<u8>) -> Option<Vec<u8>> {
+        self.accounts_vec.iter().find(|account| account.public_key == public_key).map(|account| account.obfuscated_private_key_hash.clone())
+    }
+
     // Returns the nonce of a specific public key
     pub fn get_nonce(&self, public_key: Vec<u8>) -> Option<u64> {
         self.accounts_vec.iter().find(|account| account.public_key == public_key).map(|account| account.nonce)

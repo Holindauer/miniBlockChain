@@ -1,5 +1,4 @@
 
-
 use std::collections::HashMap;
 use std::error::Error;
 use std::time::Duration;
@@ -10,11 +9,16 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::time;
 use serde_json;
 
-
-
 use crate::blockchain::BlockChain;
 use crate::constants::{DURATION_GET_PEER_CHAINS, PORT_NUMBER, VERBOSE_STACK};
 
+
+/**
+ * @notice chain_consensus.rs contains the logic for updating the local blockchain and merkle tree of a validator node
+ * that is booting up to the majority state of the network. This is done by sending a request to all other validators
+ * to send their current blockchain state. The node will then determine the majority state of the network and update
+ * its local blockchain to reflect the majority.
+*/
 
 /**
  * @notice update_local_blockchain() is an asynchronous function that fascililtates the process of updating the local 

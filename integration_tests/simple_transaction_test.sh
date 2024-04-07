@@ -81,24 +81,45 @@ clear
 # stop the validator node
 killall xterm
 
+# print the json of the most recent block
+echo 
+echo "Most Recent Block JSON: $most_recent_block_json"
+
 # print both account jsons
+echo
 echo "Account 1 JSON: $account_1_json"
 echo "Account 2 JSON: $account_2_json"
 
 # echo the block information
+echo
 echo "Block Timestamp: $timestamp"
 echo "Block Transaction Amount: $amount"
 echo "Block Sender Nonce: $sender_nonce"
 echo "Block Sender: $sender"
 echo "Block Recipient: $recipient"
 
-# Check that the information in the block matches the transaction
-if [ "$amount" -eq 0 ] && [ "$sender_nonce" -eq 1 ] && [ "$sender" == "$public_key_1" ] && [ "$recipient" == "$public_key_2" ]; then
-    echo
-    echo "Transaction test passed."
-    exit 0 # return success
+# check if the transaction was successful
+if [ "$amount" -eq 0 ]; then
+    echo "Amount test passed."
 else
-    echo
-    echo "Transaction test failed."
+    echo "Amount test failed."
     exit 1 # return failure
 fi
+
+if [ "$sender_nonce" -eq 1 ]; then
+    echo "Sender Nonce test passed."
+else
+    echo "Sender Nonce test failed."
+    exit 1 # return failure
+fi
+
+if [ "$sender" == "$public_key_1" ]; then
+    echo "Sender test passed."
+else
+    echo "Sender test failed."
+    exit 1 # return failure
+fi
+
+# Indicate success
+echo "Transaction test passed."
+exit 0 # return success

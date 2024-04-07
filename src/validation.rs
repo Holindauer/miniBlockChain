@@ -9,11 +9,12 @@ use std::time::UNIX_EPOCH;
 use hex;
 
 // Import the necessary libraries
+use crate::blockchain;
 use crate::blockchain::{BlockChain, Request, Block};
 use crate::merkle_tree::{MerkleTree, Account};
-use crate::zk_proof::verify_points_sum_hash;
 use crate::constants::{PORT_NUMBER, VERBOSE_STACK, INTEGRATION_TEST, FAUCET_AMOUNT};
-use crate::get_consensus::update_local_blockchain;
+use crate::chain_consensus;
+use crate::zk_proof;
 
 /**
  * @notice validation.rs contains the logic for running a validator node. This involves setup and validation steps.
@@ -86,11 +87,13 @@ pub fn run_validation(private_key: &String) { // TODO implemnt private key/staki
     let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone(); // TODO also update the merkle tree at bootup
 
     // send request to peers to update to network majority blockchain state. 
-    rt.block_on(async move { update_local_blockchain(blockchain).await; });
+    rt.block_on(async move { chain_consensus::update_local_blockchain(blockchain).await; });
 
     // listen for and process incoming request
     start_listening(validator_node);
 } 
+
+// ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // Event Listening Logic
 
 /**
  * @notice listen_for_connections() asynchronously listens for incoming connections on the specified address. It will spawn 
@@ -159,7 +162,7 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
         else if request["action"] == "transaction" { 
 
             // verify the transaction
-            match verify_transaction(request, merkle_tree, blockchain.clone()).await {
+            match handle_transaction_request(request, merkle_tree, blockchain.clone()).await {
                 Ok(success) => {
 
                     // upon succesfull transaction, print blockchain state
@@ -194,6 +197,7 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
     } else {eprintln!("Failed to parse message: {}", msg);}
 }
 
+// ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // Account Creation Verification Logic
 
 /**
  * @notice verify_account_creation() is an asynchronous function that verifies the creation of a new account on the blockchain
@@ -238,14 +242,17 @@ async fn verify_account_creation(request: Value, merkle_tree: Arc<Mutex<MerkleTr
 }
 
 
+
+// ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // Transaction Verification Logic
+
 /**
  * @notice verify_transaction() is an asynchronous function that verifies a transaction request on the blockchain network.
  * This function is called by handle_incoming_message() when a new transaction request is received.
  * @dev The function will verify the validity of the transaction request, update the sender and recipient balances in the
  * merkle tree, and store the request in the blockchain.
  */
-async fn verify_transaction(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<bool, String> { // TODO Simplify/decompose this function
-    if VERBOSE_STACK { println!("validation::verify_transaction() : Verifying transaction...") };
+async fn handle_transaction_request(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<bool, String> { // TODO Simplify/decompose this function
+    if VERBOSE_STACK { println!("validation::verify_transaction() : Transaction verification master function...") };
 
     // retrieve transaction details from request
     let sender_address: Vec<u8> = request["sender_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
@@ -256,54 +263,110 @@ async fn verify_transaction(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>,
     let curve_point1: String = request["sender_obfuscated_private_key_part1"].as_str().unwrap_or_default().to_string(); 
     let curve_point2: String = request["sender_obfuscated_private_key_part2"].as_str().unwrap_or_default().to_string();
 
-    // Lock the merkle tree while accessing sender accountinfo
-    let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
+    // verify the transaction independently 
+    if verify_transaction_independently(
+        sender_address.clone(), 
+        recipient_address.clone(), 
+        amount,
+        curve_point1,
+        curve_point2,
+        merkle_tree.clone()
+    ).await != true { return Ok(false); }
 
-    // retrieve sender's account
-    let sender_account: Account = merkle_tree_guard.get_account(sender_address.clone()).unwrap();
+    // TODO implement network consensus here
 
-    // retrieve sender's private key hash
-    let sender_private_key_hash: Vec<u8> = sender_account.obfuscated_private_key_hash.clone();
+    // add the transaction to the ledger
+    add_transaction_to_ledger(
+        sender_address, 
+        recipient_address, 
+        amount, 
+        merkle_tree, 
+        blockchain
+    ).await;
 
-    // decompress the curve points
-    if verify_points_sum_hash(&curve_point1, &curve_point2, sender_private_key_hash) != true { 
-        return Ok(false); 
-    }
-
-    // Check that the account doesnt already exist in the tree
-    if merkle_tree_guard.account_exists(sender_address.clone()) != true { return Ok(false); }
-    if merkle_tree_guard.account_exists(recipient_address.clone()) != true { return Ok(false); }
-        
-    // get sender and recipient balances    
-    let mut sender_balance: u64 = merkle_tree_guard.get_account_balance(sender_address.clone()).unwrap();
-    let mut recipient_balance: u64 = merkle_tree_guard.get_account_balance(recipient_address.clone()).unwrap();
-
-    // Check that the sender has sufficient balance
-    if sender_balance < amount { return Ok(false);}
-
-    // update balances and sender nonce
-    sender_balance -= amount; recipient_balance += amount;
-    merkle_tree_guard.change_balance(sender_address.clone(), sender_balance);
-    merkle_tree_guard.increment_nonce(sender_address.clone());
-    merkle_tree_guard.change_balance(recipient_address.clone(), recipient_balance);
-    
-    // retrieve other Request details
-    let sender_nonce: u64 = merkle_tree_guard.get_nonce(sender_address.clone()).unwrap();
-    let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-    
-    // Package request details in Request enum 
-    let new_account_request: Request = Request::Transaction { 
-        sender_address, sender_nonce, recipient_address, amount, time, 
-    };
-
-    // store and validate the request
-    let mut blockchain_guard: MutexGuard<BlockChain> = blockchain.lock().await;
-    blockchain_guard.store_incoming_requests(&new_account_request);
-    blockchain_guard.push_request_to_chain(new_account_request);   
 
     Ok(true) 
 }
 
+/**
+ * @notice verify_transaction_independently() is an asynchronous function that performs the verification of a transaction
+ * request recieved by a validator node. This function determines the decision of whether or not to accept the transaction
+ * based on the information that was recieved by this particular node in isolation. The resulting decision will be sent to 
+ * all other validator nodes to determine a majority decision. 
+ * @dev the checks this function performs include: verifying the sender's private key (using zk_proof module), ensuruing 
+ * the sender and recipient accounts both exist in the merkle tree, and that the sender has sufficient balance to send the
+ * transaction.
+ */
+async fn verify_transaction_independently(
+    sender_address: Vec<u8>,  // public keys
+    recipient_address: Vec<u8>, 
+    transaction_amount: u64, 
+    curve_point_1: String,  // obfuscated private key parts for zk proof scheme
+    curve_point_2: String, 
+    merkle_tree: Arc<Mutex<MerkleTree>>
+) -> bool {
+
+    // Lock the merkle tree while accessing sender account info
+    let merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
+
+    // Check that the both accounts already exist
+    if merkle_tree_guard.account_exists(sender_address.clone()) != true { return false; }
+    if merkle_tree_guard.account_exists(recipient_address.clone()) != true { return false; }
+
+    // Verify the sender's private key using the zk_proof module
+    let sender_private_key_hash: Vec<u8> = merkle_tree_guard.get_private_key_hash(sender_address.clone()).unwrap();
+    if zk_proof::verify_points_sum_hash(&curve_point_1, &curve_point_2, sender_private_key_hash) != true {  return false; }
+        
+    // get sender and recipient balances    
+    let sender_balance: u64 = merkle_tree_guard.get_account_balance(sender_address.clone()).unwrap();
+    if sender_balance < transaction_amount { return false; }
+
+    true // return true if all checks pass
+}
+
+
+/**
+ * @notice add_transaction_to_ledger() is an asynchronous function that adds a transaction that has been verified by the 
+ * entire network to both the merkle tree and the blockchain.
+ */
+async fn add_transaction_to_ledger(
+    sender_address: Vec<u8>, 
+    recipient_address: Vec<u8>, 
+    amount: u64, 
+    merkle_tree: Arc<Mutex<MerkleTree>>, 
+    blockchain: Arc<Mutex<BlockChain>>
+){
+
+    // Lock the merkle tree and blockchain while updating account balances and writing blocks
+    let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
+    let mut blockchain_guard: MutexGuard<BlockChain> = blockchain.lock().await;
+
+    // retrieve account detials from the merkle tree relavant to the tranasaction
+    let mut sender_balance: u64 = merkle_tree_guard.get_account_balance(sender_address.clone()).unwrap();
+    let mut recipient_balance: u64 = merkle_tree_guard.get_account_balance(recipient_address.clone()).unwrap();
+    let sender_nonce: u64 = merkle_tree_guard.get_nonce(sender_address.clone()).unwrap();
+    let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+    // determine new account balances
+    sender_balance -= amount; recipient_balance += amount;
+
+    // Change account balancges in the merkle tree 
+    merkle_tree_guard.change_balance(sender_address.clone(), sender_balance);
+    merkle_tree_guard.increment_nonce(sender_address.clone());
+    merkle_tree_guard.change_balance(recipient_address.clone(), recipient_balance);
+    
+    // Package request details in Request enum 
+    let new_account_request = blockchain::Request::Transaction { 
+        sender_address, sender_nonce, recipient_address, amount, time, 
+    };
+
+    // Write a new block to the blockchain
+    blockchain_guard.store_incoming_requests(&new_account_request);
+    blockchain_guard.push_request_to_chain(new_account_request);   
+
+}
+
+// ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // Faucet Verification Logic
 
 /**
  * @notice verify_faucet_request() is an asynchronous function that verifies a faucet request on the blockchain network.
@@ -343,6 +406,8 @@ async fn verify_faucet_request(request: Value, merkle_tree: Arc<Mutex<MerkleTree
 
     Ok(())
 }
+
+// ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // Helper and Integration Testing Related Functions
 
 /**
  * @notice print_chain() is an asynchronous function that prints the current state of the blockchain as maintained on the 

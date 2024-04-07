@@ -176,7 +176,7 @@ impl BlockChain {
                     recipient: recipient_address.clone(), 
                     amount: *amount,  
                     time: *time, 
-                    sender_nonce: *sender_nonce, 
+                    sender_nonce: *sender_nonce + 1, 
                     hash 
                 })
             },
