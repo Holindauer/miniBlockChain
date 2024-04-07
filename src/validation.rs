@@ -143,9 +143,7 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
             
         // Handle Request to Make New Account
         if request["action"] == "make" { 
-            
-            // verify the account creation
-            match verify_account_creation(request, merkle_tree, blockchain.clone()).await {
+            match handle_account_creation_request(request, merkle_tree, blockchain.clone()).await {
                 Ok(public_key) => {
                     
                     // upon succesfull account creation, print blockchain state
@@ -160,8 +158,6 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
 
         // Handle Request to Make New Transaction
         else if request["action"] == "transaction" { 
-
-            // verify the transaction
             match handle_transaction_request(request, merkle_tree, blockchain.clone()).await {
                 Ok(success) => {
 
@@ -205,48 +201,96 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
  * @dev The function will verify the validity of the account creation request, insert the new account into the merkle tree, and 
  * store the request in the blockchain.
  */
-async fn verify_account_creation(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<String, String> { // TODO Simplify/decompose this function
+async fn handle_account_creation_request(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<String, String> { 
     if VERBOSE_STACK { println!("validation::verify_account_creation() : Verifying account creation...") };
 
     // retrieve new public key sent with request as Vec<u8> UTF-8 encoded
     let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
     let obfuscated_private_key_hash: Vec<u8> = hex::decode(request["obfuscated_private_key_hash"].as_str().unwrap_or_default()).unwrap();
 
-    // Lock the merkle tree
-    let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
+    // verify the account creation request independently
+    if verify_account_creation_independently(
+        public_key.clone(), 
+        merkle_tree.clone()
+    ).await != true { return Err("Account already exists".to_string()); }
 
-    // Check that the account doesnt already exist in the tree
-    if merkle_tree_guard.account_exists(public_key.clone()) { return Err("Account already exists".to_string());} 
+    // TODO implement network consensus here
 
-    // Package account details in Account struct and insert into merkle tree
-    let account = Account { public_key: public_key.clone(), obfuscated_private_key_hash: obfuscated_private_key_hash.clone(), balance: 0, nonce: 0, };
-
-    // Insert the account into the merkle tree
-    merkle_tree_guard.insert_account(account);
-    assert!(merkle_tree_guard.account_exists(public_key.clone()));
-
-    // Get request details
-    let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-    let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
-
-    // Package request details in Request enum and return
-    let new_account_request: Request = Request::NewAccount { new_address: public_key, time: time, };
-
-    // store and validate the request
-    let mut blockchain_guard: MutexGuard<BlockChain> = blockchain.lock().await;
-    blockchain_guard.store_incoming_requests(&new_account_request);
-    blockchain_guard.push_request_to_chain(new_account_request);   
+    // add the account to the ledger
+    add_account_creation_to_ledger(
+        public_key.clone(), 
+        obfuscated_private_key_hash.clone(), 
+        merkle_tree.clone(), 
+        blockchain.clone()
+    ).await;
 
     // Return validated public key as a string
     Ok(request["public_key"].as_str().unwrap_or_default().to_string())
 }
 
 
+/**
+ * @notice verify_account_creation_independently() is an asynchronous function that verifies the creation of a new account on the blockchain
+ * based on the information that was recieved by this particular node in isolation. The resulting decision will be sent to all other validator
+ * nodes to determine a majority decision that will be accepted by the network regardless of the individual validator node's decision. 
+ */
+async fn verify_account_creation_independently(public_key: Vec<u8>, merkle_tree: Arc<Mutex<MerkleTree>>) -> bool {
+
+    // Lock the merkle tree while accessing sender account info
+    let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
+
+    // Check that the account doesnt already exist in the tree
+    if merkle_tree_guard.account_exists(public_key.clone()) { return false; }
+
+    // otherwise return true
+    true
+}
+
+/**
+ * @notice add_account_creation_to_ledger() is an asynchronous function that adds a new account to the ledger after it has been
+ * verified by the entire network. This function is called by handle_account_creation_request() after the account creation request
+ * has been verified.
+ */
+async fn add_account_creation_to_ledger(
+    public_key: Vec<u8>, 
+    obfuscated_private_key_hash: Vec<u8>, 
+    merkle_tree: Arc<Mutex<MerkleTree>>,
+    blockchain: Arc<Mutex<BlockChain>>
+) {
+
+    // Lock the merkle tree and blockchain while updating account balances and writing blocks
+    let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
+    let mut blockchain_guard: MutexGuard<BlockChain> = blockchain.lock().await;
+
+
+    // Package account details in Account struct and insert into merkle tree
+    let account = Account { 
+        public_key: public_key.clone(), 
+        obfuscated_private_key_hash: obfuscated_private_key_hash.clone(), 
+        balance: 0, 
+        nonce: 0, 
+    };
+
+    // Insert the account into the merkle tree
+    merkle_tree_guard.insert_account(account);
+    assert!(merkle_tree_guard.account_exists(public_key.clone()));
+
+    // Get time of account creation
+    let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+    // Package request details in Request enum 
+    let new_account_request = blockchain::Request::NewAccount { new_address: public_key, time: time, };
+
+    // Write the  acount creation in the blockchain
+    blockchain_guard.store_incoming_requests(&new_account_request);
+    blockchain_guard.push_request_to_chain(new_account_request);   
+
+}
 
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // Transaction Verification Logic
 
 /**
- * @notice verify_transaction() is an asynchronous function that verifies a transaction request on the blockchain network.
+ * @notice handle_incoming_transaction_request() is an asynchronous function that verifies a transaction request on the blockchain network.
  * This function is called by handle_incoming_message() when a new transaction request is received.
  * @dev The function will verify the validity of the transaction request, update the sender and recipient balances in the
  * merkle tree, and store the request in the blockchain.
@@ -326,9 +370,9 @@ async fn verify_transaction_independently(
 
 
 /**
- * @notice add_transaction_to_ledger() is an asynchronous function that adds a transaction that has been verified by the 
- * entire network to both the merkle tree and the blockchain.
- */
+ * @notice add_transaction_to_ledger() is an asynchronous function that adds a transaction after it has been verified by the 
+ * entire network to both the merkle tree and the blockchain. 
+*/
 async fn add_transaction_to_ledger(
     sender_address: Vec<u8>, 
     recipient_address: Vec<u8>, 
