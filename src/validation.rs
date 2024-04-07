@@ -180,7 +180,7 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
         else if request["action"] == "faucet" { 
             
             // verify the faucet request
-            match verify_faucet_request(request, merkle_tree, blockchain.clone()).await {
+            match handle_faucet_request(request, merkle_tree, blockchain.clone()).await {
                 Ok(_) => { 
                     if VERBOSE_STACK { print_chain_human_readable(blockchain.clone()).await;} 
                     if INTEGRATION_TEST { save_most_recent_block_json(blockchain.clone()).await; }
@@ -417,19 +417,54 @@ async fn add_transaction_to_ledger(
  * This results in an account balance increase of FAUCET_AMOUNT for the provided public key. This function is called by 
  * handle_incoming_message() when a new faucet request is received.
  */
-async fn verify_faucet_request(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<(), String> {
+async fn handle_faucet_request(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<(), String> {
     if VERBOSE_STACK { println!("validation::verify_faucet_request() : Verifying faucet request...") };
 
     // Check that the account exist
     let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
 
-    // Lock the merkle tree
-    let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
+    // verify the faucet request independently
+    if verify_faucet_request_independently(
+        public_key.clone(), 
+        merkle_tree.clone()
+    ).await != true { return Err("Account already exists".to_string()); }
+
+    //TODO implement network consensus here
+
+    // add the faucet request to the ledger
+    add_faucet_request_to_ledger(
+        public_key.clone(), 
+        merkle_tree.clone(), 
+        blockchain.clone()
+    ).await;
+
+    Ok(())
+}
+
+/**
+ * @notice verify_faucet_request_independently() is an asynchronous function that verifies a faucet request on the blockchain network
+ * based on the information that was recieved by this particular node in isolation. The resulting decision will be sent to all other
+ * validator nodes to determine a majority decision that will be accepted by the network regardless of the individual validator node's decision.
+ */
+async fn verify_faucet_request_independently(public_key: Vec<u8>, merkle_tree: Arc<Mutex<MerkleTree>>) -> bool {
+
+    // Lock the merkle tree while accessing sender account info
+    let merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
 
     // Check that the account doesnt already exist in the tree
-    if !merkle_tree_guard.account_exists(public_key.clone()) { 
-        return Err("Cannot Supply Funds to Non-Existence Account".to_string());
-    }
+    if !merkle_tree_guard.account_exists(public_key.clone()) { return false; }
+
+    true
+}
+
+/**
+ * @notice add_faucet_request_to_ledger() is an asynchronous function that adds a faucet request to the ledger after it has been
+ * verified by the entire network. This function is called by handle_faucet_request() after the faucet request has been verified.
+ */
+async fn add_faucet_request_to_ledger(public_key: Vec<u8>, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) {
+    // Lock the merkle tree and blockchain while updating account balances and writing blocks
+    let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
+    let mut blockchain_guard: MutexGuard<BlockChain> = blockchain.lock().await;
 
     // get the account balance and update it
     let account_balance: u64 = merkle_tree_guard.get_account_balance(public_key.clone()).unwrap();
@@ -438,17 +473,13 @@ async fn verify_faucet_request(request: Value, merkle_tree: Arc<Mutex<MerkleTree
     // update the account balance
     merkle_tree_guard.change_balance(public_key.clone(), new_balance);
 
-
     // Update the blockchain with the faucet request
     let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
     let new_account_request: Request = Request::Faucet { address: public_key, time: time, };
     
     // store and validate the request
-    let mut blockchain_guard: MutexGuard<BlockChain> = blockchain.lock().await;
     blockchain_guard.store_incoming_requests(&new_account_request);
     blockchain_guard.push_request_to_chain(new_account_request);
-
-    Ok(())
 }
 
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // Helper and Integration Testing Related Functions
