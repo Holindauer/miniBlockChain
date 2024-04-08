@@ -79,17 +79,15 @@ fn main() -> std::io::Result<()> {
         account_creation::account_creation();
 
     } // Transaction Specified
-    else if args[1] == "transaction" && args.len() == 6{  // TODO remove the need to provide the public key by using the private key to find the public key
+    else if args[1] == "transaction" && args.len() == 5{  
 
         // extract provided arguments:
-        let sender_public_key: &String = &args[2];
-        let sender_private_key: &String = &args[3];
-        let recipient_public_key: &String = &args[4];
-        let transaction_amount: &String = &args[5];
+        let sender_private_key: &String = &args[2];
+        let recipient_public_key: &String = &args[3];
+        let transaction_amount: &String = &args[4];
 
         // send transaction request to validator nodes
         send_transaction::send_transaction(
-            sender_public_key, 
             sender_private_key, 
             recipient_public_key, 
             transaction_amount

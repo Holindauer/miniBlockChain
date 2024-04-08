@@ -55,10 +55,10 @@ public_key_1=$(echo $account_1_json | jq -r '.public_key')
 secret_key_2=$(echo $account_2_json | jq -r '.secret_key')
 public_key_2=$(echo $account_2_json | jq -r '.public_key')
 
-# send transaction from account 1 to account 2
+# send transaction to account 2 using a random private key not in the system
 echo
 echo "Sending transaction from account 1 to account 2 with incorrect private key..."
-cargo run -- transaction "$public_key_1" "$secret_key_2" "$public_key_2" 0
+cargo run -- transaction cca90f3b21bb49a7a27aab8bebd4df68307f5cbd9ec989f663348d64ad432516 "$public_key_2" 0
 clear
 
 # stop the validator node
@@ -69,7 +69,7 @@ if [ -f "./failed_transaction.json" ]; then
     # Read the output from the file
     transaction_status=$(< "./failed_transaction.json")
 else
-    echo "Failed to find most recent block."
+    echo "Failed to find failed transaction indicator."
 fi
 
 # extract the information from the most_recent_block.json file

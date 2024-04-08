@@ -14,6 +14,8 @@ use curve25519_dalek::scalar::Scalar;
 use base64;
 use std::io;
 
+use secp256k1::{Secp256k1, SecretKey, PublicKey};
+
 use crate::zk_proof;
 use crate::constants::{PORT_NUMBER, VERBOSE_STACK};
 
@@ -67,14 +69,20 @@ use crate::constants::{PORT_NUMBER, VERBOSE_STACK};
  * @dev the provided keys are hexadecimal strings and the amount is string integer
  */
 pub fn send_transaction(
-    sender_public_key: &String, 
     sender_private_key: &String, 
     recipient_public_key: 
-    &String, amount: &String) { // TODO derive pub key from private key
+    &String, 
+    amount: &String ) { 
         if VERBOSE_STACK { println!("send_transaction::send_transaction() : Sending transaction request...") };
 
         // Create a new Tokio runtime 
         let rt = tokio::runtime::Runtime::new().unwrap();
+
+        // derive the sender's public key from the private key
+        let secp  = Secp256k1::new();
+        let secret_key = SecretKey::from_slice(&hex::decode(sender_private_key).unwrap()).unwrap();
+        let public_key = PublicKey::from_secret_key(&secp, &secret_key);
+        let sender_public_key = hex::encode(public_key.serialize());
 
         // block_on the async account creation process, display the results   
         match rt.block_on(send_transaction_request(
@@ -83,9 +91,7 @@ pub fn send_transaction(
             recipient_public_key.to_string(), 
             amount.to_string())
         ) 
-        {Ok(_) => { 
-            if VERBOSE_STACK { println!("send_transaction::send_transaction() : Transaction request sent successfully") }; 
-        },
+        {Ok(_) => { if VERBOSE_STACK { println!("send_transaction::send_transaction() : Transaction request sent...") }; },
         Err(e) => { eprintln!("Account creation failed: {}", e); return; }, };       
 }   
 

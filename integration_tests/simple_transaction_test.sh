@@ -55,7 +55,7 @@ public_key_2=$(echo $account_2_json | jq -r '.public_key')
 # send transaction from account 1 to account 2
 echo
 echo "Sending transaction from account 1 to account 2..."
-cargo run -- transaction "$public_key_1" "$secret_key_1" "$public_key_2" 0
+cargo run -- transaction "$secret_key_1" "$public_key_2" 0
 
 # Check for most_recent_block.json file
 if [ -f "./most_recent_block.json" ]; then
