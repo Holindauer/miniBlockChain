@@ -4,6 +4,7 @@ use tokio::net::TcpStream;
 use serde::{Serialize, Deserialize};
 use serde_json;
 use std::io;
+use std::fs;
 
 extern crate secp256k1;
 extern crate rand;
@@ -13,7 +14,8 @@ use rand::{thread_rng, RngCore}; // Ensure thread_rng is imported here
 
 use crate::helper::clear_terminal;
 use crate::zk_proof::{obfuscate_private_key, hash_obfuscated_private_key};
-use crate::constants::{INTEGRATION_TEST, PORT_NUMBER, VERBOSE_STACK};
+use crate::constants::{INTEGRATION_TEST, VERBOSE_STACK};
+use crate::validation::{NodeConfig, Config};
 
 /**
  * @notice account_creation.rs contains the logic for sending a request to the network to create a new account.
@@ -125,12 +127,20 @@ async fn send_account_creation_request() -> Result<(SecretKey, PublicKey), io::E
         obfuscated_private_key_hash: hex::encode(obfuscated_private_key_hash),
     };
 
-    // Connect to the server at the specified port number
-    let mut stream: TcpStream = TcpStream::connect(PORT_NUMBER).await?;
+    // Serialize request to JSON
+    let request_json = serde_json::to_string(&request).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-    // Serialize request to JSON, write to stream
-    let request_json: String = serde_json::to_string(&request)?;
-    stream.write_all(request_json.as_bytes()).await?;
+    // Load accepted ports configuration
+    let config_data: String = fs::read_to_string("accepted_ports.json").map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let config: Config = serde_json::from_str(&config_data).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+    // Send account creation request to all accepted ports
+    for node in config.nodes.iter() {
+        let addr = format!("{}:{}", node.address, node.port);
+        if let Ok(mut stream) = TcpStream::connect(&addr).await {
+            let _ = stream.write_all(request_json.as_bytes()).await;
+        }
+    }
 
     // Return the generated secret key and public key
     Ok((secret_key, public_key))

@@ -14,7 +14,7 @@ use hex;
 use crate::blockchain;
 use crate::blockchain::{BlockChain, Request, Block};
 use crate::merkle_tree::{MerkleTree, Account};
-use crate::constants::{PORT_NUMBER, VERBOSE_STACK, INTEGRATION_TEST, FAUCET_AMOUNT};
+use crate::constants::{VERBOSE_STACK, INTEGRATION_TEST, FAUCET_AMOUNT};
 use crate::chain_consensus;
 use crate::block_consensus;
 use crate::zk_proof;
@@ -60,15 +60,15 @@ use crate::zk_proof;
  * an excpetion will be thrown and handled by attempting to connect to the next port in the list.
  */
  #[derive(Debug, Serialize, Deserialize)]
- struct Config {
-     nodes: Vec<Node>,
+ pub struct Config {
+    pub nodes: Vec<NodeConfig>,
  }
  
  #[derive(Debug, Serialize, Deserialize)]
- struct Node {
-     id: String,
-     address: String,
-     port: u16,
+ pub struct NodeConfig {
+    pub id: String,
+    pub address: String,
+    pub port: u16,
  }
 
 /**
@@ -185,7 +185,7 @@ fn start_listening(validator_node: ValidatorNode) {
             tokio::spawn(async move {
                 let mut buffer: Vec<u8> = Vec::new();
                 if socket.read_to_end(&mut buffer).await.is_ok() && !buffer.is_empty() {
-                    handle_incoming_message(&buffer, blockchain, merkle_tree).await;
+                    handle_incoming_message(&buffer, blockchain, merkle_tree).await; // TODO probably willl need to send the port num connected to here for network request to not send back to sender
                 }
             });
         }
