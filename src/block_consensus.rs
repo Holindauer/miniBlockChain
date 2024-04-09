@@ -13,6 +13,32 @@ use crate::constants::{PORT_NUMBER, BLOCK_CONSENSUS_LISTENING};
 
 
 
+/**
+ * Protocol for Peer to Peer Consensus: (needs to be implemented)
+ * 
+ * This is the protocol for how peer nodes will come to a consensus over the decision to write a block to the
+ * blockchain by validator nodes. This protocol focuses specifically on how network communication needs to be 
+ * set up in order for peer to peer communication to be possible for this purpose. 
+ * 
+ * A configuration file containing accepted ports for the network will be used to determine which ports to connect 
+ * to when booting up a validator node for the first time. Having multiple ports also makes development of the 
+ * network easier, preventing 'address in use' errors. When a validator node boots up, it will send a request to 
+ * all ports that are not its own. This message indicates that a new validator node is connecting. This request will 
+ * include the port number being connected on, as well as a request for the current state of the network (which will 
+ * be implemented later).
+ * 
+ * When a validator receives a transaction or account creation request, they will first perform an independent 
+ * validation of the request they recieved based on the state of their node and the request details that we sent.
+ * Then, upon coming to an independent decision, they will send a network request to all accepted ports that are
+ * not the same as the one running the current node instance. This request will contain information identifying 
+ * the request and asking for thier decision of how to handle the request. Peers will send back their responce, 
+ * yay or nay, and the majority decision will be chosen. 
+ * 
+ * In order to keep track of tentative client devisions, a hash map containing of request-identigier-->decision
+ * will be used to store the responce that will be sent back when block consensus is requested from another 
+ * validator node. 
+ */
+
 
 // ! TODO There needs to be some way to verify that a validator node is truly a validator node. This could involve keeping a 
 // ! simple ledger of obfuscated private keys of validator nodes, collected when the boot up and sent to all other nodes. Then 
