@@ -68,6 +68,9 @@ use std::env;
  *     small amount of tokens that can be used to send transactions with. This is for testing purposes.
  */
 
+
+
+
 fn main() -> std::io::Result<()> {
 
     // read CLI args into vector
@@ -99,7 +102,7 @@ fn main() -> std::io::Result<()> {
 
         // extract provided arguments:
         let private_key: &String = &args[2];
-        
+            
         // Run node as a validator
         validation::run_validation(private_key);
 

@@ -3,9 +3,11 @@ use tokio::net::TcpListener;
 use tokio::io::AsyncReadExt;
 use tokio::runtime::{Runtime, Handle};
 use serde_json::Value;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
+use std::fs;
+use std::io::Error as IoError;
 use hex;
 
 // Import the necessary libraries
@@ -47,6 +49,27 @@ use crate::zk_proof;
  *    TODO eventually, risc0 will be used to validate the correct execution of validator nodes. As well, staking/slashing and 
  *    TODO validator rewards will be need to be implemented at some point.
  */
+
+
+
+
+
+/**
+ * @notive the following structs are used to load in the accepted_ports.json file which contains a llist
+ * of accepted ports for the network. When a node is booted up, if the port cannot connnect to the network,
+ * an excpetion will be thrown and handled by attempting to connect to the next port in the list.
+ */
+ #[derive(Debug, Serialize, Deserialize)]
+ struct Config {
+     nodes: Vec<Node>,
+ }
+ 
+ #[derive(Debug, Serialize, Deserialize)]
+ struct Node {
+     id: String,
+     address: String,
+     port: u16,
+ }
 
 /**
  * @notice ValidatorNode contains the local copies of the blockchain and merkle tree data structures that 
@@ -97,37 +120,77 @@ pub fn run_validation(private_key: &String) { // TODO implemnt private key/staki
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // Event Listening Logic
 
 /**
+ * @notice try_bind_to_ports() is an asynchronous function that attempts to bind to the ports specified in the
+ * accepted_ports.json file. If the function is successful, it will return a TcpListener that is bound to the
+ * first available port. If the function is unsuccessful, it will return an IoError.
+*/
+async fn try_bind_to_ports(config: &Config) -> Result<TcpListener, IoError> {
+    let mut last_error = None;
+
+    // Attempt to bind to each port in the configuration
+    for node in &config.nodes {
+        if VERBOSE_STACK { println!("validation::try_bind_to_ports() : Attempting to bind to port {}...", node.port); }
+
+        match TcpListener::bind(format!("{}:{}", node.address, node.port)).await {
+            Ok(listener) => return Ok(listener), // return the listener if successful
+            Err(e) => last_error = Some(e),
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| IoError::new(std::io::ErrorKind::Other, "No ports available")))
+}
+
+
+/**
  * @notice listen_for_connections() asynchronously listens for incoming connections on the specified address. It will spawn 
  * new tasks to handle each incoming connection. Messages to the network are passed of to handle_incoming_message() for processing.
  */
 fn start_listening(validator_node: ValidatorNode) {
-    if VERBOSE_STACK { println!("validation::start_listening() : Listening for incoming connections on port {}...", PORT_NUMBER); }
 
-    let rt = Runtime::new().unwrap(); // new tokio runtime
-    
-    // block_on async listening
-    rt.block_on(async move {
-        let listener = TcpListener::bind(PORT_NUMBER).await.unwrap(); //  connect to port
+    // Establish a new tokio runtime
+    let rt = Runtime::new().unwrap();
 
-        // loop msg acceptance --> msg handling process
+    // Spawn a new task to listen for incoming connections 
+    rt.block_on(async {
+
+        // Load the accepted ports configuration file
+        let config_data = match fs::read_to_string("accepted_ports.json") {
+            Ok(data) => data,
+            Err(e) => { eprintln!("Failed to read configuration file: {}", e); return; }
+        };
+
+        // Parse the configuration file into a Config struct
+        let config: Config = match serde_json::from_str(&config_data) {
+            Ok(config) => config,
+            Err(e) => { eprintln!("Failed to parse configuration file: {}", e); return; }
+        };
+
+        // Attempt to bind to one of the ports specified in the configuration
+        let listener = match try_bind_to_ports(&config).await {
+            Ok(listener) => listener,
+            Err(e) => {  eprintln!("Failed to bind to any configured port: {}", e); return; }
+        };
+        
+        // Indicate Successful Binding to TCP Port
+        if VERBOSE_STACK { println!("validation::start_listening() : Listening for incoming connections...") };
+
+        // Listen for incoming connections
         while let Ok((mut socket, _)) = listener.accept().await {
 
-            // clone Arc<Mutex> values before passing them to handle_incoming_message
+            // Clone the blockchain and merkle tree Arc<Mutex> values for the new task
             let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();
             let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
 
-            // spawn a new task to handle each incoming msg
+            // Spawn a new task to handle the incoming connection
             tokio::spawn(async move {
                 let mut buffer: Vec<u8> = Vec::new();
                 if socket.read_to_end(&mut buffer).await.is_ok() && !buffer.is_empty() {
-                    
-                    // handle the incoming message
                     handle_incoming_message(&buffer, blockchain, merkle_tree).await;
                 }
             });
         }
     });
- }
+}
 
 /**
  * @notice handle_incoming_message() asynchronously accepts a msg buffer and the current state of the merkle tree 
