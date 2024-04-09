@@ -19,3 +19,6 @@ pub const INTEGRATION_TEST: bool = true;
 
 // amount of tokens to send to accounts when a faucet request is made
 pub const FAUCET_AMOUNT: u64 = 100; 
+
+// duration to listen for block consensus requests
+pub const BLOCK_CONSENSUS_LISTENING: Duration = Duration::from_secs(2); 

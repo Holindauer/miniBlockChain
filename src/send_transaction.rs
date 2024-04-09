@@ -7,10 +7,6 @@ use tokio::net::TcpStream;
 use serde::{Serialize, Deserialize};
 use serde_json;
 
-use curve25519_dalek::ristretto::RistrettoPoint;
-use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT; // generator point
-use curve25519_dalek::scalar::Scalar;
-
 use base64;
 use std::io;
 

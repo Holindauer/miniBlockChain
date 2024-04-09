@@ -8,6 +8,7 @@ mod constants;
 mod faucet;
 mod helper;
 mod chain_consensus;
+mod block_consensus;
 
 use std::env;
 /**

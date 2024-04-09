@@ -1,7 +1,7 @@
 use tokio::sync::{Mutex, MutexGuard};
 use tokio::net::TcpListener;
 use tokio::io::AsyncReadExt;
-use tokio::runtime::Runtime;
+use tokio::runtime::{Runtime, Handle};
 use serde_json::Value;
 use serde::Serialize;
 use std::sync::Arc;
@@ -14,6 +14,7 @@ use crate::blockchain::{BlockChain, Request, Block};
 use crate::merkle_tree::{MerkleTree, Account};
 use crate::constants::{PORT_NUMBER, VERBOSE_STACK, INTEGRATION_TEST, FAUCET_AMOUNT};
 use crate::chain_consensus;
+use crate::block_consensus;
 use crate::zk_proof;
 
 /**
@@ -143,14 +144,12 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
             
         // Handle Request to Make New Account
         if request["action"] == "make" { 
-            match handle_account_creation_request(request, merkle_tree, blockchain.clone()).await {
+            match handle_account_creation_request(request, merkle_tree, blockchain.clone()).await {  
                 Ok(public_key) => {
                     
                     // upon succesfull account creation, print blockchain state
                     if VERBOSE_STACK { print_chain_human_readable(blockchain.clone()).await;}
-
-                    // if doing an integration test, save the most recent block as a json file
-                    if INTEGRATION_TEST { save_most_recent_block_json(blockchain.clone()).await; }  
+                    if INTEGRATION_TEST { save_most_recent_block_json(blockchain.clone()).await; }  // save latest block for integration testing
                 },
                 Err(e) => {eprintln!("Account creation Invalid: {}", e);}
             }
@@ -182,11 +181,18 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
             // verify the faucet request
             match handle_faucet_request(request, merkle_tree, blockchain.clone()).await {
                 Ok(_) => { 
+
+                    // upon succesfull faucet request, print blockchain state
                     if VERBOSE_STACK { print_chain_human_readable(blockchain.clone()).await;} 
-                    if INTEGRATION_TEST { save_most_recent_block_json(blockchain.clone()).await; }
+                    if INTEGRATION_TEST { save_most_recent_block_json(blockchain.clone()).await; } // save latest block for integration testing
                 },
                 Err(e) => { eprintln!("Faucet request failed: {}", e); }
             }
+        }
+
+        // Handle New Block Decision Request
+        else if request["action"] == "block_consensus" { 
+            // TODO implement block consensus logic here
         }
 
     else { eprintln!("Unrecognized action: {}", request["action"]);}
@@ -208,13 +214,22 @@ async fn handle_account_creation_request(request: Value, merkle_tree: Arc<Mutex<
     let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
     let obfuscated_private_key_hash: Vec<u8> = hex::decode(request["obfuscated_private_key_hash"].as_str().unwrap_or_default()).unwrap();
 
-    // verify the account creation request independently
-    if verify_account_creation_independently(
+    // get independent decision of request validity from the client node
+    let client_decision: bool = verify_account_creation_independently(
         public_key.clone(), 
         merkle_tree.clone()
-    ).await != true { return Err("Account already exists".to_string()); }
+    ).await;
 
-    // TODO implement network consensus here
+    // get network consensus on the request
+    let peer_decision: bool = block_consensus::send_block_consensus_request(
+        request.clone(), 
+        client_decision
+    ).await;
+
+    // return error if network consensus not reached
+    if (peer_decision != client_decision) { 
+        return Err("Network consensus not reached".to_string()); 
+    }
 
     // add the account to the ledger
     add_account_creation_to_ledger(
@@ -357,7 +372,7 @@ async fn verify_transaction_independently(
     if merkle_tree_guard.account_exists(sender_address.clone()) != true { return false; }
     if merkle_tree_guard.account_exists(recipient_address.clone()) != true { return false; }
 
-    // Verify the sender's private key using the zk_proof module
+    // Verify the sender's private key using the zk_proof module 
     let sender_private_key_hash: Vec<u8> = merkle_tree_guard.get_private_key_hash(sender_address.clone()).unwrap();
     if zk_proof::verify_points_sum_hash(&curve_point_1, &curve_point_2, sender_private_key_hash) != true {  return false; }
         
@@ -366,7 +381,7 @@ async fn verify_transaction_independently(
     if sender_balance < transaction_amount { return false; }
 
     true // return true if all checks pass
-}
+} // TODO issue #7 to be implemented here
 
 
 /**
