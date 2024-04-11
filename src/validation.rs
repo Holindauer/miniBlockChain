@@ -116,28 +116,16 @@ pub async fn handle_account_creation_request( request: Value, validator_node: Va
     let obfuscated_private_key_hash: Vec<u8> = hex::decode(request["obfuscated_private_key_hash"].as_str().unwrap_or_default()).unwrap();
 
     // get independent decision of request validity from the client node
-    verify_account_creation_independently(
-        public_key.clone(), 
-        request.clone(),
-        validator_node.merkle_tree.clone(),
-        validator_node.client_block_decisions.clone(),
-    ).await;
+    verify_account_creation_independently( public_key.clone(), request.clone(), validator_node.clone() ).await;
 
     // get network consensus on the request
-    let peer_decision: bool = block_consensus::send_block_consensus_request(
-        request.clone(), validator_node.clone()
-    ).await;
+    let peer_decision: bool = block_consensus::send_block_consensus_request( request.clone(), validator_node.clone() ).await;
 
     // return error if network consensus not reached
     if (peer_decision == false) { return Err("Network agreed the request was invalid".to_string());}
 
     // add the account to the ledger
-    add_account_creation_to_ledger(
-        public_key.clone(), 
-        obfuscated_private_key_hash.clone(), 
-        validator_node.merkle_tree.clone(), 
-        validator_node.blockchain.clone()
-    ).await;
+    add_account_creation_to_ledger( public_key.clone(), obfuscated_private_key_hash.clone(), validator_node.clone()).await;
 
     // Return validated public key as a string
     Ok(request["public_key"].as_str().unwrap_or_default().to_string())
@@ -149,25 +137,23 @@ pub async fn handle_account_creation_request( request: Value, validator_node: Va
  * based on the information that was recieved by this particular node in isolation. The resulting decision will be sent to all other validator
  * nodes to determine a majority decision that will be accepted by the network regardless of the individual validator node's decision. 
  */
-async fn verify_account_creation_independently(
-    public_key: Vec<u8>, 
-    request: Value,
-    merkle_tree: Arc<Mutex<MerkleTree>>, 
-    client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>
-) {
+async fn verify_account_creation_independently( public_key: Vec<u8>, request: Value, validator_node: ValidatorNode) {
 
-    let mut decision: bool = false;
+    // clone the merkle tree and client block decisions from the validator node struct
+    let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
+    let client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>> = validator_node.client_block_decisions.clone();
 
-    // Lock the merkle tree while accessing sender account info
-    let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
+    // init client decision to false
+    let decision: bool;
 
-    // Check that the account doesnt already exist in the tree
-    if merkle_tree_guard.account_exists(public_key.clone()) { return; }
+    // Lock the merkle tree while checking that the account doesnt already exist in the tree
+    let merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
+    if merkle_tree_guard.account_exists(public_key.clone()) { decision = false; }else { decision = true;}
 
     // use SHA256 to hash the request
     let client_request_hash: Vec<u8> = network::hash_network_request(request).await;
 
-    // otherwise lock the client block decisions and update the decision
+    // otherwise lock the client block decisions and update the client decision
     let mut client_block_decisions_guard: MutexGuard<HashMap<Vec<u8>, bool>> = client_block_decisions.lock().await;
     client_block_decisions_guard.insert(client_request_hash.clone(), decision);
 }
@@ -177,29 +163,24 @@ async fn verify_account_creation_independently(
  * verified by the entire network. This function is called by handle_account_creation_request() after the account creation request
  * has been verified.
  */
-async fn add_account_creation_to_ledger(
-    public_key: Vec<u8>, 
-    obfuscated_private_key_hash: Vec<u8>, 
-    merkle_tree: Arc<Mutex<MerkleTree>>,
-    blockchain: Arc<Mutex<BlockChain>>
-) {
+async fn add_account_creation_to_ledger( public_key: Vec<u8>, obfuscated_private_key_hash: Vec<u8>, validator_node: ValidatorNode ) {
+
+    // clone the blockchain and merkle tree from the validator node struct
+    let merkel_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
+    let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();
 
     // Lock the merkle tree and blockchain while updating account balances and writing blocks
-    let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
+    let mut merkel_tree_guard: MutexGuard<MerkleTree> = merkel_tree.lock().await;
     let mut blockchain_guard: MutexGuard<BlockChain> = blockchain.lock().await;
 
-
-    // Package account details in Account struct and insert into merkle tree
+    // Package account details in merkle_tree::Account struct and insert into merkle tree
     let account = Account { 
-        public_key: public_key.clone(), 
-        obfuscated_private_key_hash: obfuscated_private_key_hash.clone(), 
-        balance: 0, 
-        nonce: 0, 
+        public_key: public_key.clone(), obfuscated_private_key_hash,  balance: 0, nonce: 0, 
     };
 
     // Insert the account into the merkle tree
-    merkle_tree_guard.insert_account(account);
-    assert!(merkle_tree_guard.account_exists(public_key.clone()));
+    merkel_tree_guard.insert_account(account);
+    assert!(merkel_tree_guard.account_exists(public_key.clone()));
 
     // Get time of account creation
     let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();

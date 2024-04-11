@@ -99,7 +99,7 @@ pub fn start_listening(validator_node: ValidatorNode) {
             Ok(result) => { // indicate success and return the listener and port address in a tuple
                 if VERBOSE_STACK { println!("validation::start_listening() : Listening for incoming connection on`{}...`", result.1); } result },
 
-            Err(e) => { eprintln!("Failed to bind to any configured port: {}", e); return; }
+            Err(e) => { eprintln!("Refused to bind to any configured port: {}", e); return; }
         };       
 
         // set the client port address in the validator node master struct 

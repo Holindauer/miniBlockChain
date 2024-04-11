@@ -87,20 +87,17 @@ struct BlockConsensusResponse {
  * the correct block consensus decision in being considered.
 */
 pub async fn send_block_consensus_request( request: Value, validator_node: validation::ValidatorNode ) -> bool {
-
     if VERBOSE_STACK { println!("block_consensus::send_block_consensus_request() : Preparing block consensus request..."); }
 
 
     // extract the port number form the validator node
     let self_port: String = validator_node.client_port_address.clone();
     let peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>> = validator_node.peer_consensus_decisions.clone();
-    let client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>> = validator_node.client_block_decisions.clone();
-
 
 
     // Hash request recieved by client. This will be used to ensure te same right 
     // request is processed upon validator nodes recieving this request.
-    let client_request_hash: Vec<u8> = network::hash_network_request(request).await;
+    let client_request_hash: Vec<u8> = network::hash_network_request(request.clone()).await;
 
     // Package request in struct and serialize to JSON
     let consensus_request = BlockConsensusRequest {
@@ -138,13 +135,11 @@ pub async fn send_block_consensus_request( request: Value, validator_node: valid
             }
         }
     }   
+
+    // wait
     
     // Determine if the client's decision is the majority decision
-    let majority_decision: bool = determine_majority(
-        peer_consensus_decisions, 
-        client_block_decisions,
-        client_request_hash
-    ).await;
+    let majority_decision: bool = determine_majority(request.clone(), validator_node.clone()).await;
 
     majority_decision
 }
@@ -154,29 +149,41 @@ pub async fn send_block_consensus_request( request: Value, validator_node: valid
  * @notice determine_majority() is an asynchronous function that determines the majority decision of the network based on the responses
  * recieved from other validator nodes. This function is used within the send_block_consensus_request() function.
  */
-async fn determine_majority(
-    peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>>,
-    client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>,
-    client_request_hash: Vec<u8>
-) -> bool {
+async fn determine_majority(request: Value, validator_node: validation::ValidatorNode) -> bool {
+    if VERBOSE_STACK { println!("block_consensus::determine_majority() : Determining majority decision..."); }
 
-    // Lock mutex when accessing responses
-    let peer_responces_guard = peer_consensus_decisions.lock().await;
+    // get block decision from validator node
+    let peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>> = validator_node.peer_consensus_decisions.clone();
+    let client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>> = validator_node.client_block_decisions.clone();
 
-    // Get counts for true and false  peerdecisions
-    let mut true_count: u32 = peer_responces_guard.get(&client_request_hash).unwrap().0;
-    let mut false_count: u32 = peer_responces_guard.get(&client_request_hash).unwrap().1;
+    // Hash request recieved by client. This will be used to ensure te same right
+    let client_request_hash: Vec<u8> = network::hash_network_request(request).await;
 
     // get client decision from locked guard
     let client_decision_guard = client_block_decisions.lock().await;
     let client_decision: bool = client_decision_guard.get(&client_request_hash).unwrap().clone();
 
+    // Lock mutex when accessing responses
+    let mut true_count: u32 = 0; let mut false_count: u32 = 0;
+
+    // print client decision
+    println!("Client Decision: {}", client_decision);
+
     // Add client decision to count
-    if client_decision { true_count += 1; }
-    else { false_count += 1; }
+    if client_decision { true_count += 1; } else { false_count += 1; }
+
+    // Lock mutex and check if there are peer responces, get the counts for true and false decisions
+    let peer_responces_guard = peer_consensus_decisions.lock().await;
+    if peer_responces_guard.contains_key(&client_request_hash) {
+
+        // if there are peer respencesget counts from locked guard
+        true_count += peer_responces_guard.get(&client_request_hash).unwrap().0;
+        false_count += peer_responces_guard.get(&client_request_hash).unwrap().1;
+    } 
 
     // return the decision 
     if true_count > false_count { true } else { false }
+    
 }
 
 
