@@ -14,7 +14,7 @@ use secp256k1::{Secp256k1, SecretKey, PublicKey};
 
 use crate::zk_proof;
 use crate::constants::{PORT_NUMBER, VERBOSE_STACK};
-
+use crate::validation::{PortConfig, NetworkConfig};
 
 /**
  * @notice send_tranasaction.rs contains the logic for sending a network to request a transaction of value between two
@@ -124,7 +124,7 @@ async fn send_transaction_request(
     // Connect and send the message
     let mut stream: TcpStream = TcpStream::connect(PORT_NUMBER).await?; 
     let message_json: String = serde_json::to_string(&message)?;
-    stream.write_all(message_json.as_bytes()).await?;
+    stream.write_all(message_json.as_bytes()).await?;  // TODO modify this to send to alll ports
 
     Ok(())
 }

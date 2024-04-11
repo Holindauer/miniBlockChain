@@ -15,7 +15,7 @@ use rand::{thread_rng, RngCore}; // Ensure thread_rng is imported here
 use crate::helper::clear_terminal;
 use crate::zk_proof::{obfuscate_private_key, hash_obfuscated_private_key};
 use crate::constants::{INTEGRATION_TEST, VERBOSE_STACK};
-use crate::validation::{NodeConfig, Config};
+use crate::validation::{PortConfig, NetworkConfig};
 
 /**
  * @notice account_creation.rs contains the logic for sending a request to the network to create a new account.
@@ -132,9 +132,9 @@ async fn send_account_creation_request() -> Result<(SecretKey, PublicKey), io::E
 
     // Load accepted ports configuration
     let config_data: String = fs::read_to_string("accepted_ports.json").map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-    let config: Config = serde_json::from_str(&config_data).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let config: NetworkConfig = serde_json::from_str(&config_data).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-    // Send account creation request to all accepted ports
+    // Send account creation request to all accepted po
     for node in config.nodes.iter() {
         let addr = format!("{}:{}", node.address, node.port);
         if let Ok(mut stream) = TcpStream::connect(&addr).await {

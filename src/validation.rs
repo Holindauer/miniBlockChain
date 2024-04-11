@@ -51,21 +51,21 @@ use crate::zk_proof;
  */
 
 
-
-
-
 /**
- * @notive the following structs are used to load in the accepted_ports.json file which contains a llist
+ * @notice the following structs are used to load in the accepted_ports.json file which contains a llist
  * of accepted ports for the network. When a node is booted up, if the port cannot connnect to the network,
  * an excpetion will be thrown and handled by attempting to connect to the next port in the list.
  */
  #[derive(Debug, Serialize, Deserialize)]
- pub struct Config {
-    pub nodes: Vec<NodeConfig>,
+ pub struct NetworkConfig {
+    pub nodes: Vec<PortConfig>,
  }
  
+ /**
+  * @notice PortConfig is within the process of deserializing the accepted_ports.json file into a Vec<NodeConfig> struct.
+  */
  #[derive(Debug, Serialize, Deserialize)]
- pub struct NodeConfig {
+ pub struct PortConfig {
     pub id: String,
     pub address: String,
     pub port: u16,
@@ -98,7 +98,7 @@ impl ValidatorNode {
  * the network from the client side for running a validator node.
  */
 pub fn run_validation(private_key: &String) { // TODO implemnt private key/staking idea. Private key to send tokens to
-    if VERBOSE_STACK { println!("validation::run_validation() : Booting up validator node..."); }
+    if VERBOSE_STACK { println!("\nvalidation::run_validation() : Booting up validator node..."); }
 
     // init validator node struct w/ empty blockchain and merkle tree
     let validator_node: ValidatorNode = ValidatorNode::new();
@@ -124,15 +124,20 @@ pub fn run_validation(private_key: &String) { // TODO implemnt private key/staki
  * accepted_ports.json file. If the function is successful, it will return a TcpListener that is bound to the
  * first available port. If the function is unsuccessful, it will return an IoError.
 */
-async fn try_bind_to_ports(config: &Config) -> Result<TcpListener, IoError> {
+async fn try_bind_to_ports(config: &NetworkConfig) -> Result<(TcpListener, String), IoError> {
     let mut last_error = None;
 
     // Attempt to bind to each port in the configuration
     for node in &config.nodes {
         if VERBOSE_STACK { println!("validation::try_bind_to_ports() : Attempting to bind to port {}...", node.port); }
 
-        match TcpListener::bind(format!("{}:{}", node.address, node.port)).await {
-            Ok(listener) => return Ok(listener), // return the listener if successful
+        // format the address and port into a string
+        let port_address: String = format!("{}:{}", node.address, node.port);
+
+        // Attempt to bind to the address and port
+        match TcpListener::bind(port_address.clone()).await {
+            
+            Ok(listener) => return Ok((listener, port_address.clone())), // return the listener if successful
             Err(e) => last_error = Some(e),
         }
     }
@@ -160,19 +165,19 @@ fn start_listening(validator_node: ValidatorNode) {
         };
 
         // Parse the configuration file into a Config struct
-        let config: Config = match serde_json::from_str(&config_data) {
+        let config: NetworkConfig = match serde_json::from_str(&config_data) {
             Ok(config) => config,
             Err(e) => { eprintln!("Failed to parse configuration file: {}", e); return; }
         };
 
         // Attempt to bind to one of the ports specified in the configuration
-        let listener = match try_bind_to_ports(&config).await {
-            Ok(listener) => listener,
-            Err(e) => {  eprintln!("Failed to bind to any configured port: {}", e); return; }
+        let (listener, port_address) = match try_bind_to_ports(&config).await {
+            Ok(result) => result,
+            Err(e) => { eprintln!("Failed to bind to any configured port: {}", e); return; }
         };
         
         // Indicate Successful Binding to TCP Port
-        if VERBOSE_STACK { println!("validation::start_listening() : Listening for incoming connections...") };
+        if VERBOSE_STACK { println!("validation::start_listening() : Listening for incoming connection on`{}...`", port_address); }
 
         // Listen for incoming connections
         while let Ok((mut socket, _)) = listener.accept().await {
@@ -180,12 +185,17 @@ fn start_listening(validator_node: ValidatorNode) {
             // Clone the blockchain and merkle tree Arc<Mutex> values for the new task
             let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();
             let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
+            let self_port: String = port_address.clone();
 
             // Spawn a new task to handle the incoming connection
             tokio::spawn(async move {
+
+                // Read the incoming message from the socket
                 let mut buffer: Vec<u8> = Vec::new();
                 if socket.read_to_end(&mut buffer).await.is_ok() && !buffer.is_empty() {
-                    handle_incoming_message(&buffer, blockchain, merkle_tree).await; // TODO probably willl need to send the port num connected to here for network request to not send back to sender
+
+                    // Handle the incoming message
+                    handle_incoming_message(&buffer, self_port, blockchain, merkle_tree).await; // TODO probably willl need to send the port num connected to here for network request to not send back to sender
                 }
             });
         }
@@ -196,10 +206,15 @@ fn start_listening(validator_node: ValidatorNode) {
  * @notice handle_incoming_message() asynchronously accepts a msg buffer and the current state of the merkle tree 
  * and blockchain. The buffer is parsed and the next step for the request is determined from the msg contents. 
  */
-async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain>>, merkle_tree: Arc<Mutex<MerkleTree>>) {
-    if VERBOSE_STACK { println!("validation::handle_incoming_message() : Handling incoming message...") };
+async fn handle_incoming_message(
+    buffer: &[u8], 
+    self_port: String,
+    blockchain: Arc<Mutex<BlockChain>>, 
+    merkle_tree: Arc<Mutex<MerkleTree>>
+) {
+    if VERBOSE_STACK { println!("\nvalidation::handle_incoming_message() : Handling incoming message...") };
 
-    // convert the buffer to a string and print
+    // convert the buffer to a string 
     let msg = String::from_utf8_lossy(&buffer[..buffer.len()]);
 
     // After parsing to JSON determine what to do with the msg
@@ -207,7 +222,7 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
             
         // Handle Request to Make New Account
         if request["action"] == "make" { 
-            match handle_account_creation_request(request, merkle_tree, blockchain.clone()).await {  
+            match handle_account_creation_request(request, self_port, merkle_tree, blockchain.clone()).await {  
                 Ok(public_key) => {
                     
                     // upon succesfull account creation, print blockchain state
@@ -255,6 +270,7 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
 
         // Handle New Block Decision Request
         else if request["action"] == "block_consensus" { 
+            println!("Block Consensus Request Recieved...");
             // TODO implement block consensus logic here
         }
 
@@ -270,7 +286,12 @@ async fn handle_incoming_message(buffer: &[u8], blockchain: Arc<Mutex<BlockChain
  * @dev The function will verify the validity of the account creation request, insert the new account into the merkle tree, and 
  * store the request in the blockchain.
  */
-async fn handle_account_creation_request(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<String, String> { 
+async fn handle_account_creation_request(
+    request: Value, 
+    self_port: String,
+    merkle_tree: Arc<Mutex<MerkleTree>>, 
+    blockchain: Arc<Mutex<BlockChain>>,
+) -> Result<String, String> { 
     if VERBOSE_STACK { println!("validation::verify_account_creation() : Verifying account creation...") };
 
     // retrieve new public key sent with request as Vec<u8> UTF-8 encoded
@@ -283,16 +304,15 @@ async fn handle_account_creation_request(request: Value, merkle_tree: Arc<Mutex<
         merkle_tree.clone()
     ).await;
 
+    if VERBOSE_STACK { println!("validation::verify_account_creation() : Client decision: {}", client_decision); }
+
     // get network consensus on the request
     let peer_decision: bool = block_consensus::send_block_consensus_request(
-        request.clone(), 
-        client_decision
+        request.clone(), client_decision, self_port.clone()
     ).await;
 
     // return error if network consensus not reached
-    if (peer_decision != client_decision) { 
-        return Err("Network consensus not reached".to_string()); 
-    }
+    if (peer_decision == false) { return Err("Network agreed the request was invalid".to_string());}
 
     // add the account to the ledger
     add_account_creation_to_ledger(

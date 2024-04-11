@@ -1,16 +1,19 @@
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use serde_json::Value;
-use sha2::{Sha256, Digest};
+use serde_json; 
 use serde::{Serialize, Deserialize};
+use sha2::{Sha256, Digest};
 use std::time::Duration;
 use tokio::time;
 use tokio::sync::Mutex;
 use std::sync::Arc;
-use std::net::SocketAddr;
+use std::fs;
+use std::io as IoError;
+use tokio::io::Error as TokioIoError; // For handling async I/O errors
 
-use crate::constants::{PORT_NUMBER, BLOCK_CONSENSUS_LISTENING};
-
+use crate::constants::{BLOCK_CONSENSUS_LISTENING, PORT_NUMBER, VERBOSE_STACK};
+use crate::validation::NetworkConfig;
 
 
 /**
@@ -58,6 +61,7 @@ use crate::constants::{PORT_NUMBER, BLOCK_CONSENSUS_LISTENING};
  struct BlockConsensusRequest{ 
     action: String, 
     request_hash: Vec<u8>,
+    self_port: String,
 }
 
  #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,7 +69,6 @@ struct BlockConsensusResponse {
     request_hash: Vec<u8>,
     decision: bool,
 }
-
 
  
 
@@ -78,7 +81,8 @@ struct BlockConsensusResponse {
  * to this request will be a boolean value indicating the majority decision of the network, along with the hash of the request to ensure that 
  * the correct block consensus decision in being considered.
 */
-pub async fn send_block_consensus_request(request: Value, client_decision: bool) -> bool {
+pub async fn send_block_consensus_request(request: Value, client_decision: bool, self_port: String) -> bool {
+    if VERBOSE_STACK { println!("block_consensus::send_block_consensus_request() : Preparing block consensus request..."); }
 
     // Hash request recieved by client. This will be used to ensure te same right 
     // request is processed upon validator nodes recieving this request.
@@ -86,22 +90,51 @@ pub async fn send_block_consensus_request(request: Value, client_decision: bool)
     hasher.update(request.to_string());
     let request_hash: Vec<u8> = hasher.finalize().to_vec();
 
-    // Clone request hash for use in determining majority decision prior to moving
-    let request_hash_clone = request_hash.clone();
-
     // Package request in struct and serialize to JSON
     let consensus_request = BlockConsensusRequest {
         action: "block_consensus".to_string(),
-        request_hash,
+        request_hash: request_hash.clone(),
+        self_port: self_port.clone()
     };
     let json_msg: String = serde_json::to_string(&consensus_request).unwrap();
 
-    // Connect to port and send msg to validator nodes
-    let mut stream = TcpStream::connect(PORT_NUMBER).await.unwrap();
-    stream.write_all(json_msg.as_bytes()).await.unwrap();
+    // Collect all outbound ports
+    let outbound_ports: Vec<String> = collect_outbound_ports(self_port.clone()).await.unwrap();
 
-    // Listen for responses
-    let listener = TcpListener::bind(PORT_NUMBER).await.unwrap();
+    for port in outbound_ports.iter() {
+        println!("Port: {}", port);
+    }
+
+    // Connect to port and send msg to validator nodes
+    for port in outbound_ports.iter() {
+        if VERBOSE_STACK { println!("send_block_consensus_request() : Sending block consensus request to: {}", port); } 
+
+        // Only Send Messages to other ports
+        if port != &self_port {
+
+            // Connect to port and send message  
+            match TcpStream::connect(port).await {
+
+                // Send message to port if connection is successful
+                Ok(mut stream) => {
+                    if let Err(e) = stream.write_all(json_msg.as_bytes()).await { eprintln!("Failed to send message to {}: {}", port, e); }
+                    if VERBOSE_STACK { println!("send_block_consensus_request() : Sending block consensus request to: {}", port); } 
+                },
+
+                // Print error message if connection fails
+                Err(_) => { eprintln!("Failed to connect to {}, There may not be a listener...", port); }
+            }
+        }
+    }   
+    
+    if VERBOSE_STACK { println!("attemping to connect to listener..."); }
+
+    // Establish listener on the client's port. Resonses willl be directed here.
+    let listener = TcpListener::bind(self_port.clone()).await.unwrap(); // TODO binding to same port again
+
+    if VERBOSE_STACK { println!("Listener established on port: {}", self_port); }
+
+    // Establish a vector to store responses
     let responses:  Arc<Mutex<Vec<(Vec<u8>, bool)>>> = Arc::new(Mutex::new(Vec::new()));
     let listener_future = listen_for_responses(listener, responses.clone());
 
@@ -110,12 +143,33 @@ pub async fn send_block_consensus_request(request: Value, client_decision: bool)
     let majority_decision: bool = determine_majority(
         responses.clone(), 
         client_decision,
-        request_hash_clone
+        request_hash
     ).await;
 
     majority_decision
 }
 
+/**
+ * @notice collect_outbound_ports() is an asynchronous function that reads the configuration file containing the accepted 
+ * ports of the network. All ports that are not the port of the client are collected and returned as a vector of strings.
+ */
+async fn collect_outbound_ports(self_port: String) -> Result<Vec<String>, TokioIoError> {
+
+    // Asynchronously load the accepted ports configuration file
+    let config_data = tokio::fs::read_to_string("accepted_ports.json").await?;
+
+    // Parse the configuration file into a Config struct
+    let config: NetworkConfig = serde_json::from_str(&config_data)
+        .map_err(|e| TokioIoError::new(std::io::ErrorKind::Other, format!("Failed to parse configuration file: {}", e)))?;
+
+    // Collect all outbound ports
+    let outbound_ports: Vec<String> = config.nodes.iter()
+        .map(|port| format!("{}:{}", port.address, port.port))
+        .filter(|port_address| port_address != &self_port)
+        .collect();
+
+    Ok(outbound_ports)
+}
 /**
  * @notice listen_for_responses() is an asynchronous function that listens for responses from other validator nodes regarding their decision
  * on whether or not to accept a new block into the blockchain. This function is used within the send_block_consensus_request() function.
