@@ -9,6 +9,7 @@ mod faucet;
 mod helper;
 mod chain_consensus;
 mod block_consensus;
+mod network;
 
 use std::env;
 /**

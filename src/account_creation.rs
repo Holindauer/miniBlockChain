@@ -15,7 +15,7 @@ use rand::{thread_rng, RngCore}; // Ensure thread_rng is imported here
 use crate::helper::clear_terminal;
 use crate::zk_proof::{obfuscate_private_key, hash_obfuscated_private_key};
 use crate::constants::{INTEGRATION_TEST, VERBOSE_STACK};
-use crate::validation::{PortConfig, NetworkConfig};
+use crate::network::{PortConfig, NetworkConfig};
 
 /**
  * @notice account_creation.rs contains the logic for sending a request to the network to create a new account.

@@ -15,7 +15,8 @@ use std::collections::HashMap;
 
 
 use crate::constants::{BLOCK_CONSENSUS_LISTENING, PORT_NUMBER, VERBOSE_STACK};
-use crate::validation::NetworkConfig;
+use crate::network::NetworkConfig;
+use crate::validation;
 
 
 /**
@@ -84,14 +85,17 @@ struct BlockConsensusResponse {
  * to this request will be a boolean value indicating the majority decision of the network, along with the hash of the request to ensure that 
  * the correct block consensus decision in being considered.
 */
-pub async fn send_block_consensus_request(
-    request: Value, 
-    self_port: String, 
-    peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>>,
-    client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>
-) -> bool {
+pub async fn send_block_consensus_request( request: Value, validator_node: validation::ValidatorNode ) -> bool {
 
     if VERBOSE_STACK { println!("block_consensus::send_block_consensus_request() : Preparing block consensus request..."); }
+
+
+    // extract the port number form the validator node
+    let self_port: String = validator_node.client_port_address.clone();
+    let peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>> = validator_node.peer_consensus_decisions.clone();
+    let client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>> = validator_node.client_block_decisions.clone();
+
+
 
     // Hash request recieved by client. This will be used to ensure te same right 
     // request is processed upon validator nodes recieving this request.
@@ -207,8 +211,13 @@ async fn collect_outbound_ports(self_port: String) -> Result<Vec<String>, TokioI
  * This function will retrieve the client decision from the request, package the response, and send the response back to the requesting node.
  * The funnction is called within the validator module.
  */
-pub async fn handle_block_consensus_request(request: Value, client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>, self_port: String) -> Result<(), std::io::Error> {
+pub async fn handle_block_consensus_request(request: Value, validator_node: validation::ValidatorNode) -> Result<(), std::io::Error> {
     
+
+    // extract the port number and client block decisions from the validator node
+    let self_port: String = validator_node.client_port_address.clone();
+    let client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>= validator_node.client_block_decisions.clone();
+
     // retrieve hash of request from request
     let request_hash: Vec<u8> = request["request_hash"].as_str().unwrap().as_bytes().to_vec();
 

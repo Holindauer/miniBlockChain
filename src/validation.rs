@@ -1,15 +1,10 @@
 use tokio::sync::{Mutex, MutexGuard};
-use tokio::net::TcpListener;
-use tokio::io::AsyncReadExt;
-use tokio::runtime::{Runtime, Handle};
+use tokio::runtime::Runtime;
 use serde_json::Value;
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
-use std::fs;
-use std::io::Error as IoError;
 use std::collections::HashMap;
-use hex;
 
 // Import the necessary libraries
 use crate::blockchain;
@@ -19,6 +14,7 @@ use crate::constants::{VERBOSE_STACK, INTEGRATION_TEST, FAUCET_AMOUNT};
 use crate::chain_consensus;
 use crate::block_consensus;
 use crate::zk_proof;
+use crate::network;
 use sha2::{Digest, Sha256};
 
 /**
@@ -53,25 +49,6 @@ use sha2::{Digest, Sha256};
  */
 
 
-/**
- * @notice the following structs are used to load in the accepted_ports.json file which contains a llist
- * of accepted ports for the network. When a node is booted up, if the port cannot connnect to the network,
- * an excpetion will be thrown and handled by attempting to connect to the next port in the list.
- */
- #[derive(Debug, Serialize, Deserialize)]
- pub struct NetworkConfig {
-    pub nodes: Vec<PortConfig>,
- }
- 
- /**
-  * @notice PortConfig is within the process of deserializing the accepted_ports.json file into a Vec<NodeConfig> struct.
-  */
- #[derive(Debug, Serialize, Deserialize)]
- pub struct PortConfig {
-    pub id: String,
-    pub address: String,
-    pub port: u16,
- }
 
 /**
  * @notice ValidatorNode contains the local copies of the blockchain and merkle tree data structures that 
@@ -80,10 +57,11 @@ use sha2::{Digest, Sha256};
  */
 #[derive(Clone)]
 pub struct ValidatorNode {
-    blockchain: Arc<Mutex<BlockChain>>,
-    merkle_tree: Arc<Mutex<MerkleTree>>,
-    peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>>, // request hash -> (decisions yay, decisions nay)
-    client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>, // request hash -> decision
+    pub blockchain: Arc<Mutex<BlockChain>>,
+    pub merkle_tree: Arc<Mutex<MerkleTree>>,
+    pub peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>>, // request hash -> (decisions yay, decisions nay)
+    pub client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>, // request hash -> decision
+    pub client_port_address: String,    
 }
 
 impl ValidatorNode {
@@ -95,6 +73,7 @@ impl ValidatorNode {
             merkle_tree: Arc::new(Mutex::new(MerkleTree::new())),
             peer_consensus_decisions: Arc::new(Mutex::new(HashMap::new())),
             client_block_decisions: Arc::new(Mutex::new(HashMap::new())),
+            client_port_address: String::new(),
         }
     }
 }
@@ -108,207 +87,19 @@ pub fn run_validation(private_key: &String) { // TODO implemnt private key/staki
 
     // init validator node struct w/ empty blockchain and merkle tree
     let validator_node: ValidatorNode = ValidatorNode::new();
-
-    // establish a new tokio runtime
-    let rt = Runtime::new().unwrap(); 
-
-    // clone the shared Arc<Mutex> values from the node struct
-    let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();
-    let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone(); // TODO also update the merkle tree at bootup
-
-    // send request to peers to update to network majority blockchain state. 
-    rt.block_on(async move { chain_consensus::update_local_blockchain(blockchain).await; });
-
-    // listen for and process incoming request
-    start_listening(validator_node);
-} 
-
-// ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // Event Listening Logic
-
-/**
- * @notice try_bind_to_ports() is an asynchronous function that attempts to bind to the ports specified in the
- * accepted_ports.json file. If the function is successful, it will return a TcpListener that is bound to the
- * first available port. If the function is unsuccessful, it will return an IoError.
-*/
-async fn try_bind_to_ports(config: &NetworkConfig) -> Result<(TcpListener, String), IoError> {
-    let mut last_error = None;
-
-    // Attempt to bind to each port in the configuration
-    for node in &config.nodes {
-        if VERBOSE_STACK { println!("validation::try_bind_to_ports() : Attempting to bind to port {}...", node.port); }
-
-        // format the address and port into a string
-        let port_address: String = format!("{}:{}", node.address, node.port);
-
-        // Attempt to bind to the address and port
-        match TcpListener::bind(port_address.clone()).await {
-            
-            Ok(listener) => return Ok((listener, port_address.clone())), // return the listener if successful
-            Err(e) => last_error = Some(e),
-        }
-    }
-
-    Err(last_error.unwrap_or_else(|| IoError::new(std::io::ErrorKind::Other, "No ports available")))
-}
-
-
-/**
- * @notice listen_for_connections() asynchronously listens for incoming connections on the specified address. It will spawn 
- * new tasks to handle each incoming connection. Messages to the network are passed of to handle_incoming_message() for processing.
- */
-fn start_listening(validator_node: ValidatorNode) {
+    let validator_node_clone = validator_node.clone();
 
     // Establish a new tokio runtime
-    let rt = Runtime::new().unwrap();
+    let rt = Runtime::new().unwrap(); 
 
-    // Spawn a new task to listen for incoming connections 
-    rt.block_on(async {
+    // send request to peers to update to network majority blockchain state. 
+    rt.block_on(async move { chain_consensus::update_local_blockchain(validator_node_clone).await; }); // TODO modify this to also update the merkle tree at bootup
 
-        // Load the accepted ports configuration file
-        let config_data = match fs::read_to_string("accepted_ports.json") {
-            Ok(data) => data,
-            Err(e) => { eprintln!("Failed to read configuration file: {}", e); return; }
-        };
+    // listen for and process incoming request
+    network::start_listening(validator_node.clone());
+} 
 
-        // Parse the configuration file into a Config struct
-        let config: NetworkConfig = match serde_json::from_str(&config_data) {
-            Ok(config) => config,
-            Err(e) => { eprintln!("Failed to parse configuration file: {}", e); return; }
-        };
 
-        // Attempt to bind to one of the ports specified in the configuration
-        let (listener, port_address) = match try_bind_to_ports(&config).await {
-            Ok(result) => result,
-            Err(e) => { eprintln!("Failed to bind to any configured port: {}", e); return; }
-        };
-        
-        // Indicate Successful Binding to TCP Port
-        if VERBOSE_STACK { println!("validation::start_listening() : Listening for incoming connection on`{}...`", port_address); }
-
-        // Listen for incoming connections
-        while let Ok((mut socket, _)) = listener.accept().await {
-
-            // Clone the blockchain and merkle tree Arc<Mutex> values for the new task
-            let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();
-            let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
-            let self_port: String = port_address.clone();
-            let peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>> = validator_node.peer_consensus_decisions.clone();
-            let client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>> = validator_node.client_block_decisions.clone();
-
-            // Spawn a new task to handle the incoming connection
-            tokio::spawn(async move {
-
-            
-                // Read the incoming message from the socket
-                let mut buffer: Vec<u8> = Vec::new();
-                if socket.read_to_end(&mut buffer).await.is_ok() && !buffer.is_empty() {
-
-                    // Handle the incoming message
-                    handle_incoming_message(
-                        &buffer, 
-                        self_port, 
-                        blockchain, 
-                        merkle_tree,
-                        peer_consensus_decisions,
-                        client_block_decisions,                    
-                    ).await; // TODO probably willl need to send the port num connected to here for network request to not send back to sender
-                }
-            });
-        }
-    });
-}
-
-/**
- * @notice handle_incoming_message() asynchronously accepts a msg buffer and the current state of the merkle tree 
- * and blockchain. The buffer is parsed and the next step for the request is determined from the msg contents. 
- */
-async fn handle_incoming_message(
-    buffer: &[u8], 
-    self_port: String,
-    blockchain: Arc<Mutex<BlockChain>>, 
-    merkle_tree: Arc<Mutex<MerkleTree>>,
-    peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>>,
-    client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>
-) {
-    if VERBOSE_STACK { println!("\nvalidation::handle_incoming_message() : Handling incoming message...") };
-
-    // convert the buffer to a string 
-    let msg = String::from_utf8_lossy(&buffer[..buffer.len()]);
-
-    // After parsing to JSON determine what to do with the msg
-    if let Ok(request) = serde_json::from_str::<Value>(&msg) {
-            
-        // Handle Request to Make New Account
-        if request["action"] == "make" { 
-            match handle_account_creation_request(
-                request, 
-                self_port, 
-                merkle_tree, 
-                blockchain.clone(), 
-                peer_consensus_decisions,
-                client_block_decisions).await {  
-                Ok(public_key) => {
-                    
-                    // upon succesfull account creation, print blockchain state
-                    if VERBOSE_STACK { print_chain_human_readable(blockchain.clone()).await;}
-                    if INTEGRATION_TEST { save_most_recent_block_json(blockchain.clone()).await; }  // save latest block for integration testing
-                },
-                Err(e) => {eprintln!("Account creation Invalid: {}", e);}
-            }
-        } 
-
-        // Handle Request to Make New Transaction
-        else if request["action"] == "transaction" { 
-            match handle_transaction_request(request, merkle_tree, blockchain.clone()).await {
-                Ok(success) => {
-
-                    // upon succesfull transaction, print blockchain state
-                    if VERBOSE_STACK {
-                        if success { print_chain_human_readable(blockchain.clone()).await;}
-                        else { eprintln!("Transaction failed to verify"); }
-                    }                       
-
-                    // if doing an integration test, save the most recent block as a json file
-                    if INTEGRATION_TEST { 
-                        save_most_recent_block_json(blockchain.clone()).await;
-                        if !success { save_failed_transaction_json().await; }
-                     } 
-                },
-                Err(e) => {eprintln!("Transaction Validation Error: {}", e);}
-            }
-        } 
-        // Handle Request to Use Faucet
-        else if request["action"] == "faucet" { 
-            
-            // verify the faucet request
-            match handle_faucet_request(request, merkle_tree, blockchain.clone()).await {
-                Ok(_) => { 
-
-                    // upon succesfull faucet request, print blockchain state
-                    if VERBOSE_STACK { print_chain_human_readable(blockchain.clone()).await;} 
-                    if INTEGRATION_TEST { save_most_recent_block_json(blockchain.clone()).await; } // save latest block for integration testing
-                },
-                Err(e) => { eprintln!("Faucet request failed: {}", e); }
-            }
-        }
-
-        // Handle New Block Decision Request
-        else if request["action"] == "block_consensus" { 
-            println!("Block Consensus Request Recieved...");
-            match block_consensus::handle_block_consensus_request(
-                request, 
-                client_block_decisions.clone(),
-                self_port.clone(), 
-                
-            ).await {
-                Ok(_) => { println!("Block Consensus Request Handled..."); },
-                Err(e) => { eprintln!("Block Consensus Request Failed: {}", e); }
-            }
-        }
-
-    else { eprintln!("Unrecognized action: {}", request["action"]);}
-    } else {eprintln!("Failed to parse message: {}", msg);}
-}
 
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // Account Creation Verification Logic
 
@@ -318,15 +109,7 @@ async fn handle_incoming_message(
  * @dev The function will verify the validity of the account creation request, insert the new account into the merkle tree, and 
  * store the request in the blockchain.
  */
-async fn handle_account_creation_request(
-    request: Value, 
-    self_port: String,
-    merkle_tree: Arc<Mutex<MerkleTree>>, 
-    blockchain: Arc<Mutex<BlockChain>>,
-    peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>>,
-    client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>
-) -> Result<String, String> { 
-
+pub async fn handle_account_creation_request( request: Value, validator_node: ValidatorNode) -> Result<String, String> { 
     if VERBOSE_STACK { println!("validation::verify_account_creation() : Verifying account creation...") };
 
     // retrieve new public key sent with request as Vec<u8> UTF-8 encoded
@@ -337,16 +120,13 @@ async fn handle_account_creation_request(
     verify_account_creation_independently(
         public_key.clone(), 
         request.clone(),
-        merkle_tree.clone(),
-        client_block_decisions.clone()
+        validator_node.merkle_tree.clone(),
+        validator_node.client_block_decisions.clone(),
     ).await;
 
     // get network consensus on the request
     let peer_decision: bool = block_consensus::send_block_consensus_request(
-        request.clone(), 
-        self_port.clone(),
-        peer_consensus_decisions,
-        client_block_decisions,
+        request.clone(), validator_node.clone()
     ).await;
 
     // return error if network consensus not reached
@@ -356,8 +136,8 @@ async fn handle_account_creation_request(
     add_account_creation_to_ledger(
         public_key.clone(), 
         obfuscated_private_key_hash.clone(), 
-        merkle_tree.clone(), 
-        blockchain.clone()
+        validator_node.merkle_tree.clone(), 
+        validator_node.blockchain.clone()
     ).await;
 
     // Return validated public key as a string
@@ -444,8 +224,12 @@ async fn add_account_creation_to_ledger(
  * @dev The function will verify the validity of the transaction request, update the sender and recipient balances in the
  * merkle tree, and store the request in the blockchain.
  */
-async fn handle_transaction_request(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<bool, String> { // TODO Simplify/decompose this function
+pub async fn handle_transaction_request(request: Value, validator_node: ValidatorNode) -> Result<bool, String> { // TODO Simplify/decompose this function
     if VERBOSE_STACK { println!("validation::verify_transaction() : Transaction verification master function...") };
+
+    // clone the blockchain and merkle tree from the validator node struct
+    let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
+    let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();
 
     // retrieve transaction details from request
     let sender_address: Vec<u8> = request["sender_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
@@ -566,7 +350,7 @@ async fn add_transaction_to_ledger(
  * This results in an account balance increase of FAUCET_AMOUNT for the provided public key. This function is called by 
  * handle_incoming_message() when a new faucet request is received.
  */
-async fn handle_faucet_request(request: Value, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) -> Result<(), String> {
+pub async fn handle_faucet_request(request: Value, validator_node: ValidatorNode) -> Result<(), String> {
     if VERBOSE_STACK { println!("validation::verify_faucet_request() : Verifying faucet request...") };
 
     // Check that the account exist
@@ -575,7 +359,7 @@ async fn handle_faucet_request(request: Value, merkle_tree: Arc<Mutex<MerkleTree
     // verify the faucet request independently
     if verify_faucet_request_independently(
         public_key.clone(), 
-        merkle_tree.clone()
+        validator_node.merkle_tree.clone()
     ).await != true { return Err("Account already exists".to_string()); }
 
     //TODO implement network consensus here
@@ -583,8 +367,8 @@ async fn handle_faucet_request(request: Value, merkle_tree: Arc<Mutex<MerkleTree
     // add the faucet request to the ledger
     add_faucet_request_to_ledger(
         public_key.clone(), 
-        merkle_tree.clone(), 
-        blockchain.clone()
+        validator_node.merkle_tree.clone(), 
+        validator_node.blockchain.clone()
     ).await;
 
     Ok(())
@@ -638,7 +422,7 @@ async fn add_faucet_request_to_ledger(public_key: Vec<u8>, merkle_tree: Arc<Mute
  * client side. This function is called by verify_account_creation() and verify_transaction() after storing the request in the 
  * blockchain.
  */
-async fn print_chain_human_readable(blockchain: Arc<Mutex<BlockChain>>) { 
+pub async fn print_chain_human_readable(blockchain: Arc<Mutex<BlockChain>>) { 
 
     // lock blockchain mutex for printing
     let blockchain_guard: MutexGuard<'_, BlockChain> = blockchain.lock().await; 
@@ -706,7 +490,7 @@ enum BlockJson {
  * @notice save_most_recent_block_json() is an asynchronous function that saves the most recent block in the
  * blockchain as a JSON file. This function is used to save the most recent block during integration testing.
  */
-async fn save_most_recent_block_json(blockchain: Arc<Mutex<BlockChain>>) {
+pub async fn save_most_recent_block_json(blockchain: Arc<Mutex<BlockChain>>) {
     let blockchain_guard: MutexGuard<'_, BlockChain> = blockchain.lock().await;
 
     if let Some(most_recent_block) = blockchain_guard.chain.last() {
@@ -743,7 +527,7 @@ async fn save_most_recent_block_json(blockchain: Arc<Mutex<BlockChain>>) {
  * @noticd save_failed_transaction_json() is an async function that saves the most recent failed transaction as a
  * JSON file. This function is used to save the most recent failed transaction during integration testing.
  */
-async fn save_failed_transaction_json(){
+pub async fn save_failed_transaction_json(){
 
     // save a simple json file that just contains the number 1 for failed transaction
     let message_json = serde_json::to_string(&1).unwrap();

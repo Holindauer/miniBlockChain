@@ -11,6 +11,7 @@ use serde_json;
 
 use crate::blockchain::BlockChain;
 use crate::constants::{DURATION_GET_PEER_CHAINS, PORT_NUMBER, VERBOSE_STACK};
+use crate::validation;
 
 
 /**
@@ -25,9 +26,11 @@ use crate::constants::{DURATION_GET_PEER_CHAINS, PORT_NUMBER, VERBOSE_STACK};
  * blockchain and merkle tree to the majority state of the network. This function is called by validation::run_validation() 
  * when booting up a new validator node.
 */
-pub async fn update_local_blockchain(local_chain: Arc<Mutex<BlockChain>>) {
+pub async fn update_local_blockchain(validator_node: validation::ValidatorNode) {
     if VERBOSE_STACK { println!("validation::update_local_blockchain() : Accepting blockchain records from peers for {} seconds...", DURATION_GET_PEER_CHAINS.as_secs()); }  // TODO eventually move the blockchain update funcs into a seperate file. validation.rs is getting too big
  
+    let local_chain = validator_node.blockchain.clone();
+
      // Get majority network chain state if available
      match collect_blockchain_records(DURATION_GET_PEER_CHAINS).await {
          Ok(peer_blockchains) => {
