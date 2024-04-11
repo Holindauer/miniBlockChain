@@ -11,6 +11,8 @@ use std::sync::Arc;
 use std::fs;
 use std::io as IoError;
 use tokio::io::Error as TokioIoError; // For handling async I/O errors
+use std::collections::HashMap;
+
 
 use crate::constants::{BLOCK_CONSENSUS_LISTENING, PORT_NUMBER, VERBOSE_STACK};
 use crate::validation::NetworkConfig;
@@ -61,11 +63,12 @@ use crate::validation::NetworkConfig;
  struct BlockConsensusRequest{ 
     action: String, 
     request_hash: Vec<u8>,
-    self_port: String,
+    resonse_port: String,
 }
 
  #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BlockConsensusResponse {
+    action: String,
     request_hash: Vec<u8>,
     decision: bool,
 }
@@ -81,20 +84,26 @@ struct BlockConsensusResponse {
  * to this request will be a boolean value indicating the majority decision of the network, along with the hash of the request to ensure that 
  * the correct block consensus decision in being considered.
 */
-pub async fn send_block_consensus_request(request: Value, client_decision: bool, self_port: String) -> bool {
+pub async fn send_block_consensus_request(
+    request: Value, 
+    self_port: String, 
+    peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>>,
+    client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>
+) -> bool {
+
     if VERBOSE_STACK { println!("block_consensus::send_block_consensus_request() : Preparing block consensus request..."); }
 
     // Hash request recieved by client. This will be used to ensure te same right 
     // request is processed upon validator nodes recieving this request.
     let mut hasher = Sha256::new();
     hasher.update(request.to_string());
-    let request_hash: Vec<u8> = hasher.finalize().to_vec();
+    let client_request_hash: Vec<u8> = hasher.finalize().to_vec();
 
     // Package request in struct and serialize to JSON
     let consensus_request = BlockConsensusRequest {
         action: "block_consensus".to_string(),
-        request_hash: request_hash.clone(),
-        self_port: self_port.clone()
+        request_hash: client_request_hash.clone(),
+        resonse_port: self_port.clone()
     };
     let json_msg: String = serde_json::to_string(&consensus_request).unwrap();
 
@@ -122,32 +131,51 @@ pub async fn send_block_consensus_request(request: Value, client_decision: bool,
                 },
 
                 // Print error message if connection fails
-                Err(_) => { eprintln!("Failed to connect to {}, There may not be a listener...", port); }
+                Err(_) => { println!("block_consensus::send_block_consensus_request() : Failed to connect to {}, There may not be a listener...", port); }
             }
         }
     }   
     
-    if VERBOSE_STACK { println!("attemping to connect to listener..."); }
-
-    // Establish listener on the client's port. Resonses willl be directed here.
-    let listener = TcpListener::bind(self_port.clone()).await.unwrap(); // TODO binding to same port again
-
-    if VERBOSE_STACK { println!("Listener established on port: {}", self_port); }
-
-    // Establish a vector to store responses
-    let responses:  Arc<Mutex<Vec<(Vec<u8>, bool)>>> = Arc::new(Mutex::new(Vec::new()));
-    let listener_future = listen_for_responses(listener, responses.clone());
-
-
     // Determine if the client's decision is the majority decision
     let majority_decision: bool = determine_majority(
-        responses.clone(), 
-        client_decision,
-        request_hash
+        peer_consensus_decisions, 
+        client_block_decisions,
+        client_request_hash
     ).await;
 
     majority_decision
 }
+
+
+/**
+ * @notice determine_majority() is an asynchronous function that determines the majority decision of the network based on the responses
+ * recieved from other validator nodes. This function is used within the send_block_consensus_request() function.
+ */
+async fn determine_majority(
+    peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>>,
+    client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>,
+    client_request_hash: Vec<u8>
+) -> bool {
+
+    // Lock mutex when accessing responses
+    let peer_responces_guard = peer_consensus_decisions.lock().await;
+
+    // Get counts for true and false  peerdecisions
+    let mut true_count: u32 = peer_responces_guard.get(&client_request_hash).unwrap().0;
+    let mut false_count: u32 = peer_responces_guard.get(&client_request_hash).unwrap().1;
+
+    // get client decision from locked guard
+    let client_decision_guard = client_block_decisions.lock().await;
+    let client_decision: bool = client_decision_guard.get(&client_request_hash).unwrap().clone();
+
+    // Add client decision to count
+    if client_decision { true_count += 1; }
+    else { false_count += 1; }
+
+    // return the decision 
+    if true_count > false_count { true } else { false }
+}
+
 
 /**
  * @notice collect_outbound_ports() is an asynchronous function that reads the configuration file containing the accepted 
@@ -170,90 +198,79 @@ async fn collect_outbound_ports(self_port: String) -> Result<Vec<String>, TokioI
 
     Ok(outbound_ports)
 }
-/**
- * @notice listen_for_responses() is an asynchronous function that listens for responses from other validator nodes regarding their decision
- * on whether or not to accept a new block into the blockchain. This function is used within the send_block_consensus_request() function.
-*/
-async fn listen_for_responses(listener: TcpListener, responses: Arc<Mutex<Vec<(Vec<u8>, bool)>>>) {
 
-    // Collect responses from validator nodes
-    let collector = async move {
 
-        // Listen for responses for a duration
-        let end_time = time::Instant::now() + BLOCK_CONSENSUS_LISTENING;
 
-        // Loop until timeout
-        loop {
-            
-            // Establish loop break condition
-            let timeout_duration: Duration = end_time.saturating_duration_since(time::Instant::now());
-            if timeout_duration.is_zero() { break; }
-
-            // Listen for responses
-            let accept_future = listener.accept();
-            match time::timeout(timeout_duration, accept_future).await {
-
-                // If a response is recieved, spawn a new task to process the response
-                Ok(Ok((mut socket, _))) => {
-                    let responses = responses.clone();
-                    tokio::spawn(async move {
-
-                        // Read response from socket
-                        let mut buffer = Vec::new();
-                        if let Ok(_) = socket.read_to_end(&mut buffer).await {
-
-                            // Convert responce to BlockConsensusResponce struct
-                            if let Ok(response) = serde_json::from_slice::<BlockConsensusResponse>(&buffer) {
-
-                                // Push responses to the locked Mutex guard
-                                let mut responses_guard = responses.lock().await;
-                                responses_guard.push((response.request_hash, response.decision));
-                            }
-                        }
-                    });
-                },
-                _ => break, // Break on timeout or error
-            }
-        }
-    };
-
-    collector.await;
-}
 
 /**
- * @notice determine_majority() is an asynchronous function that determines the majority decision of the network based on the responses
- * recieved from other validator nodes. This function is used within the send_block_consensus_request() function.
+ * @notice handle_block_consensus_request() is an asynchronous function that handles a block consensus request from another validator node.
+ * This function will retrieve the client decision from the request, package the response, and send the response back to the requesting node.
+ * The funnction is called within the validator module.
  */
-async fn determine_majority(
-    responses: Arc<Mutex<Vec<(Vec<u8>, bool)>>>, 
-    client_decision: bool, 
-    client_request_hash: Vec<u8>
-) -> bool {
-
-    // Create counts for true and false decisions
-    let mut true_count: u32 = 0;
-    let mut false_count: u32 = 0;
-
-    // Add client decision to count
-    if client_decision { true_count += 1; }
-    else { false_count += 1; }
+pub async fn handle_block_consensus_request(request: Value, client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>, self_port: String) -> Result<(), std::io::Error> {
+    
+    // retrieve hash of request from request
+    let request_hash: Vec<u8> = request["request_hash"].as_str().unwrap().as_bytes().to_vec();
 
     // Lock mutex when accessing responses
-    let responces_guard = responses.lock().await;
+    let mut client_block_decisions_guard = client_block_decisions.lock().await;
 
-    // Iterate through responses
-    for (request_hash, decision) in responces_guard.iter() {
+    // retrieve client decision from request
+    let client_decision: bool = client_block_decisions_guard.get(&request_hash).unwrap().clone();
 
-        // ensure we are working on the same request
-        if request_hash == &client_request_hash {
+    // Send response to client
+    respond_to_block_consensus_request(request_hash, client_decision, self_port).await;
 
-            // Add decision to count depending on value
-            if *decision { true_count += 1; }
-            else { false_count += 1; }
-        }
-    }
-    
-    // Determine majority decision
-    if true_count > false_count { return true; }
-    else { return false; }
+    Ok(())    
 }
+
+/**
+ * @notice respond_to_block_consensus_request() is an asynchronous function that sends a response to a block consensus request
+ * containing the client decision of whether or not to accept a new block into the blockchain. This function is used within the
+ * handle_block_consensus_request() function.
+ */
+async fn respond_to_block_consensus_request(
+    client_request_hash: Vec<u8>,
+    client_decision: bool,
+    self_port: String
+){
+    // Package responce in struct and serialize to JSON
+    let consensus_responce = BlockConsensusResponse {
+        action: "block_consensus".to_string(),
+        request_hash: client_request_hash.clone(),
+        decision: client_decision
+    };
+
+    // Serialize responce to JSON
+    let json_msg: String = serde_json::to_string(&consensus_responce).unwrap();
+
+    // Collect all outbound ports
+    let outbound_ports: Vec<String> = collect_outbound_ports(self_port.clone()).await.unwrap();
+
+    for port in outbound_ports.iter() {
+        println!("Port: {}", port);
+    }
+
+    // Connect to port and send msg to validator nodes
+    for port in outbound_ports.iter() {
+        if VERBOSE_STACK { println!("respond_to_block_consensus_request() : Sending block consensus request to: {}", port); } 
+
+        // Only Send Messages to other ports
+        if port != &self_port {
+
+            // Connect to port and send message  
+            match TcpStream::connect(port).await {
+
+                // Send message to port if connection is successful
+                Ok(mut stream) => {
+                    if let Err(e) = stream.write_all(json_msg.as_bytes()).await { eprintln!("Failed to send message to {}: {}", port, e); }
+                    if VERBOSE_STACK { println!("respond_to_block_consensus_request() : Sending block consensus request to: {}", port); } 
+                },
+
+                // Print error message if connection fails
+                Err(_) => { println!("block_consensus::respond_to_block_consensus_request() : Failed to connect to {}, There may not be a listener...", port); }
+            }
+        }
+    }   
+}
+

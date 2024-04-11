@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 use std::fs;
 use std::io::Error as IoError;
+use std::collections::HashMap;
 use hex;
 
 // Import the necessary libraries
@@ -18,6 +19,7 @@ use crate::constants::{VERBOSE_STACK, INTEGRATION_TEST, FAUCET_AMOUNT};
 use crate::chain_consensus;
 use crate::block_consensus;
 use crate::zk_proof;
+use sha2::{Digest, Sha256};
 
 /**
  * @notice validation.rs contains the logic for running a validator node. This involves setup and validation steps.
@@ -80,6 +82,8 @@ use crate::zk_proof;
 pub struct ValidatorNode {
     blockchain: Arc<Mutex<BlockChain>>,
     merkle_tree: Arc<Mutex<MerkleTree>>,
+    peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>>, // request hash -> (decisions yay, decisions nay)
+    client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>, // request hash -> decision
 }
 
 impl ValidatorNode {
@@ -89,6 +93,8 @@ impl ValidatorNode {
         ValidatorNode { 
             blockchain: Arc::new(Mutex::new(BlockChain::new())),
             merkle_tree: Arc::new(Mutex::new(MerkleTree::new())),
+            peer_consensus_decisions: Arc::new(Mutex::new(HashMap::new())),
+            client_block_decisions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -106,7 +112,7 @@ pub fn run_validation(private_key: &String) { // TODO implemnt private key/staki
     // establish a new tokio runtime
     let rt = Runtime::new().unwrap(); 
 
-    // clone the blockchain and merkle tree Arc<Mutex> values
+    // clone the shared Arc<Mutex> values from the node struct
     let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();
     let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone(); // TODO also update the merkle tree at bootup
 
@@ -186,16 +192,26 @@ fn start_listening(validator_node: ValidatorNode) {
             let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();
             let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
             let self_port: String = port_address.clone();
+            let peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>> = validator_node.peer_consensus_decisions.clone();
+            let client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>> = validator_node.client_block_decisions.clone();
 
             // Spawn a new task to handle the incoming connection
             tokio::spawn(async move {
 
+            
                 // Read the incoming message from the socket
                 let mut buffer: Vec<u8> = Vec::new();
                 if socket.read_to_end(&mut buffer).await.is_ok() && !buffer.is_empty() {
 
                     // Handle the incoming message
-                    handle_incoming_message(&buffer, self_port, blockchain, merkle_tree).await; // TODO probably willl need to send the port num connected to here for network request to not send back to sender
+                    handle_incoming_message(
+                        &buffer, 
+                        self_port, 
+                        blockchain, 
+                        merkle_tree,
+                        peer_consensus_decisions,
+                        client_block_decisions,                    
+                    ).await; // TODO probably willl need to send the port num connected to here for network request to not send back to sender
                 }
             });
         }
@@ -210,7 +226,9 @@ async fn handle_incoming_message(
     buffer: &[u8], 
     self_port: String,
     blockchain: Arc<Mutex<BlockChain>>, 
-    merkle_tree: Arc<Mutex<MerkleTree>>
+    merkle_tree: Arc<Mutex<MerkleTree>>,
+    peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>>,
+    client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>
 ) {
     if VERBOSE_STACK { println!("\nvalidation::handle_incoming_message() : Handling incoming message...") };
 
@@ -222,7 +240,13 @@ async fn handle_incoming_message(
             
         // Handle Request to Make New Account
         if request["action"] == "make" { 
-            match handle_account_creation_request(request, self_port, merkle_tree, blockchain.clone()).await {  
+            match handle_account_creation_request(
+                request, 
+                self_port, 
+                merkle_tree, 
+                blockchain.clone(), 
+                peer_consensus_decisions,
+                client_block_decisions).await {  
                 Ok(public_key) => {
                     
                     // upon succesfull account creation, print blockchain state
@@ -271,7 +295,15 @@ async fn handle_incoming_message(
         // Handle New Block Decision Request
         else if request["action"] == "block_consensus" { 
             println!("Block Consensus Request Recieved...");
-            // TODO implement block consensus logic here
+            match block_consensus::handle_block_consensus_request(
+                request, 
+                client_block_decisions.clone(),
+                self_port.clone(), 
+                
+            ).await {
+                Ok(_) => { println!("Block Consensus Request Handled..."); },
+                Err(e) => { eprintln!("Block Consensus Request Failed: {}", e); }
+            }
         }
 
     else { eprintln!("Unrecognized action: {}", request["action"]);}
@@ -291,7 +323,10 @@ async fn handle_account_creation_request(
     self_port: String,
     merkle_tree: Arc<Mutex<MerkleTree>>, 
     blockchain: Arc<Mutex<BlockChain>>,
+    peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>>,
+    client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>
 ) -> Result<String, String> { 
+
     if VERBOSE_STACK { println!("validation::verify_account_creation() : Verifying account creation...") };
 
     // retrieve new public key sent with request as Vec<u8> UTF-8 encoded
@@ -299,16 +334,19 @@ async fn handle_account_creation_request(
     let obfuscated_private_key_hash: Vec<u8> = hex::decode(request["obfuscated_private_key_hash"].as_str().unwrap_or_default()).unwrap();
 
     // get independent decision of request validity from the client node
-    let client_decision: bool = verify_account_creation_independently(
+    verify_account_creation_independently(
         public_key.clone(), 
-        merkle_tree.clone()
+        request.clone(),
+        merkle_tree.clone(),
+        client_block_decisions.clone()
     ).await;
-
-    if VERBOSE_STACK { println!("validation::verify_account_creation() : Client decision: {}", client_decision); }
 
     // get network consensus on the request
     let peer_decision: bool = block_consensus::send_block_consensus_request(
-        request.clone(), client_decision, self_port.clone()
+        request.clone(), 
+        self_port.clone(),
+        peer_consensus_decisions,
+        client_block_decisions,
     ).await;
 
     // return error if network consensus not reached
@@ -332,16 +370,29 @@ async fn handle_account_creation_request(
  * based on the information that was recieved by this particular node in isolation. The resulting decision will be sent to all other validator
  * nodes to determine a majority decision that will be accepted by the network regardless of the individual validator node's decision. 
  */
-async fn verify_account_creation_independently(public_key: Vec<u8>, merkle_tree: Arc<Mutex<MerkleTree>>) -> bool {
+async fn verify_account_creation_independently(
+    public_key: Vec<u8>, 
+    request: Value,
+    merkle_tree: Arc<Mutex<MerkleTree>>, 
+    client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>
+) {
+
+    let mut decision: bool = false;
 
     // Lock the merkle tree while accessing sender account info
     let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
 
     // Check that the account doesnt already exist in the tree
-    if merkle_tree_guard.account_exists(public_key.clone()) { return false; }
+    if merkle_tree_guard.account_exists(public_key.clone()) { return; }
 
-    // otherwise return true
-    true
+    // use SHA256 to hash the request
+    let mut hasher = Sha256::new();
+    hasher.update(request.to_string());
+    let client_request_hash: Vec<u8> = hasher.finalize().to_vec();
+
+    // otherwise lock the client block decisions and update the decision
+    let mut client_block_decisions_guard: MutexGuard<HashMap<Vec<u8>, bool>> = client_block_decisions.lock().await;
+    client_block_decisions_guard.insert(client_request_hash.clone(), decision);
 }
 
 /**
