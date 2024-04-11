@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use crate::constants::{BLOCK_CONSENSUS_LISTENING, PORT_NUMBER, VERBOSE_STACK};
 use crate::network::NetworkConfig;
+use crate::network;
 use crate::validation;
 
 
@@ -99,9 +100,7 @@ pub async fn send_block_consensus_request( request: Value, validator_node: valid
 
     // Hash request recieved by client. This will be used to ensure te same right 
     // request is processed upon validator nodes recieving this request.
-    let mut hasher = Sha256::new();
-    hasher.update(request.to_string());
-    let client_request_hash: Vec<u8> = hasher.finalize().to_vec();
+    let client_request_hash: Vec<u8> = network::hash_network_request(request).await;
 
     // Package request in struct and serialize to JSON
     let consensus_request = BlockConsensusRequest {

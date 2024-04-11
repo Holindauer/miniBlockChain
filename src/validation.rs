@@ -1,7 +1,7 @@
 use tokio::sync::{Mutex, MutexGuard};
 use tokio::runtime::Runtime;
 use serde_json::Value;
-use serde::{Serialize, Deserialize};
+use serde::Serialize;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 use std::collections::HashMap;
@@ -10,12 +10,11 @@ use std::collections::HashMap;
 use crate::blockchain;
 use crate::blockchain::{BlockChain, Request, Block};
 use crate::merkle_tree::{MerkleTree, Account};
-use crate::constants::{VERBOSE_STACK, INTEGRATION_TEST, FAUCET_AMOUNT};
+use crate::constants::{VERBOSE_STACK, FAUCET_AMOUNT};
 use crate::chain_consensus;
 use crate::block_consensus;
 use crate::zk_proof;
 use crate::network;
-use sha2::{Digest, Sha256};
 
 /**
  * @notice validation.rs contains the logic for running a validator node. This involves setup and validation steps.
@@ -166,9 +165,7 @@ async fn verify_account_creation_independently(
     if merkle_tree_guard.account_exists(public_key.clone()) { return; }
 
     // use SHA256 to hash the request
-    let mut hasher = Sha256::new();
-    hasher.update(request.to_string());
-    let client_request_hash: Vec<u8> = hasher.finalize().to_vec();
+    let client_request_hash: Vec<u8> = network::hash_network_request(request).await;
 
     // otherwise lock the client block decisions and update the decision
     let mut client_block_decisions_guard: MutexGuard<HashMap<Vec<u8>, bool>> = client_block_decisions.lock().await;

@@ -5,6 +5,7 @@ use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use tokio::runtime::Runtime;
 use tokio::io::AsyncReadExt;
+use sha2::{Digest, Sha256};
 
 use crate::validation;
 use crate::validation::ValidatorNode;
@@ -199,4 +200,18 @@ async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode )
             _ => eprintln!("Unrecognized action: {:?}", request_action),
         }
     } else {eprintln!("Failed to parse message: {}", msg);}
+}
+
+
+/**
+ * @notice hash_network_request() uses Sha256 to hash a serde_json::Value that contains that contains network request information
+ */
+pub async fn hash_network_request(request_struct_json: Value) -> Vec<u8> {
+
+    // use SHA256 to hash the request
+    let mut hasher = Sha256::new();
+    hasher.update(request_struct_json.to_string());
+
+    // return finalized Vec<u8> hash
+    hasher.finalize().to_vec()
 }

@@ -6,7 +6,6 @@ mod merkle_tree;
 mod zk_proof;
 mod constants;
 mod faucet;
-mod helper;
 mod chain_consensus;
 mod block_consensus;
 mod network;

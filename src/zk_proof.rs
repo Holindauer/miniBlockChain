@@ -2,7 +2,7 @@
 use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT; // generator point
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
-use secp256k1::{Secp256k1, SecretKey};
+use secp256k1::SecretKey;
 use sha2::{Digest, Sha256};
 use base64::decode;
 use std::convert::TryInto;

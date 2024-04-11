@@ -12,7 +12,6 @@ extern crate rand;
 use secp256k1::{Secp256k1, SecretKey, PublicKey};
 use rand::{thread_rng, RngCore}; // Ensure thread_rng is imported here
 
-use crate::helper::clear_terminal;
 use crate::zk_proof::{obfuscate_private_key, hash_obfuscated_private_key};
 use crate::constants::{INTEGRATION_TEST, VERBOSE_STACK};
 use crate::network::{PortConfig, NetworkConfig};
