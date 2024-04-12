@@ -65,6 +65,8 @@ else
     echo "Failed to find most recent block."
 fi
 
+echo $most_recent_block_json
+
 # use jq to extract the block 
 timestamp=$(echo $most_recent_block_json | jq -r '.time')
 amount=$(echo $most_recent_block_json | jq -r '.amount')
@@ -73,7 +75,7 @@ sender=$(echo $most_recent_block_json | jq -r '.sender')
 recipient=$(echo $most_recent_block_json | jq -r '.recipient')
 
 
-# remove the most_recent_block.json file now that we have the information
+remove the most_recent_block.json file now that we have the information
 rm -f ./most_recent_block.json
 
 clear
@@ -119,6 +121,8 @@ else
     echo "Sender test failed."
     exit 1 # return failure
 fi
+
+
 
 # Indicate success
 echo "Transaction test passed."

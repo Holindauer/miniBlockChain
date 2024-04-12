@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use crate::blockchain;
 use crate::blockchain::{BlockChain, Request, Block};
 use crate::merkle_tree::{MerkleTree, Account};
-use crate::constants::{VERBOSE_STACK, FAUCET_AMOUNT};
+use crate::constants::{VERBOSE_STACK, FAUCET_AMOUNT, WAIT_BEFORE_CONSENSUS_REQUEST, INTEGRATION_TEST};
 use crate::chain_consensus;
 use crate::block_consensus;
 use crate::zk_proof;
@@ -103,20 +103,24 @@ pub fn run_validation(private_key: &String) { // TODO implemnt private key/staki
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // Account Creation Verification Logic
 
 /**
- * @notice verify_account_creation() is an asynchronous function that verifies the creation of a new account on the blockchain
- * network. This function is called by handle_incoming_message() when a new account creation request is received. 
- * @dev The function will verify the validity of the account creation request, insert the new account into the merkle tree, and 
- * store the request in the blockchain.
+ * @notice handle_account_creation_request() is passed a JSON Value object that contains information regarding a new account creation
+ * request. This function fascilitates the high level logic for verifying the request and adding the account to the ledger if it is 
+ * found valid. This ivolves first, verifying the request independently, based on the information within the request with regards to 
+ * the local state of the chain. Then, the function will send to the network for the independent decisions made by peer validator nodes.
+ * If the network reaches a consensus that the request is valid, the account will be added to the ledger, otherwise nothing will happen. 
  */
 pub async fn handle_account_creation_request( request: Value, validator_node: ValidatorNode) -> Result<String, String> { 
-    if VERBOSE_STACK { println!("validation::verify_account_creation() : Verifying account creation...") };
+    if VERBOSE_STACK { println!("validation::handle_account_creation_request() : Handling account creation...") };
 
     // retrieve new public key sent with request as Vec<u8> UTF-8 encoded
     let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
     let obfuscated_private_key_hash: Vec<u8> = hex::decode(request["obfuscated_private_key_hash"].as_str().unwrap_or_default()).unwrap();
 
-    // get independent decision of request validity from the client node
+    // perform independent vallidation and store decision in validator node struct
     verify_account_creation_independently( public_key.clone(), request.clone(), validator_node.clone() ).await;
+
+    // wait 10 seconds for independent decisions to be made by peers
+    // tokio::time::sleep(WAIT_BEFORE_CONSENSUS_REQUEST).await;
 
     // get network consensus on the request
     let peer_decision: bool = block_consensus::send_block_consensus_request( request.clone(), validator_node.clone() ).await;
@@ -205,10 +209,6 @@ async fn add_account_creation_to_ledger( public_key: Vec<u8>, obfuscated_private
 pub async fn handle_transaction_request(request: Value, validator_node: ValidatorNode) -> Result<bool, String> { // TODO Simplify/decompose this function
     if VERBOSE_STACK { println!("validation::verify_transaction() : Transaction verification master function...") };
 
-    // clone the blockchain and merkle tree from the validator node struct
-    let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
-    let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();
-
     // retrieve transaction details from request
     let sender_address: Vec<u8> = request["sender_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
     let recipient_address: Vec<u8> = request["recipient_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
@@ -225,7 +225,7 @@ pub async fn handle_transaction_request(request: Value, validator_node: Validato
         amount,
         curve_point1,
         curve_point2,
-        merkle_tree.clone()
+        validator_node.merkle_tree.clone()
     ).await != true { return Ok(false); }
 
     // TODO implement network consensus here
@@ -235,10 +235,9 @@ pub async fn handle_transaction_request(request: Value, validator_node: Validato
         sender_address, 
         recipient_address, 
         amount, 
-        merkle_tree, 
-        blockchain
+        validator_node.merkle_tree.clone(), 
+        validator_node.blockchain.clone()
     ).await;
-
 
     Ok(true) 
 }
@@ -336,9 +335,8 @@ pub async fn handle_faucet_request(request: Value, validator_node: ValidatorNode
 
     // verify the faucet request independently
     if verify_faucet_request_independently(
-        public_key.clone(), 
-        validator_node.merkle_tree.clone()
-    ).await != true { return Err("Account already exists".to_string()); }
+        public_key.clone(), validator_node.merkle_tree.clone()
+    ).await != true { return Err("Account doesn't exists".to_string()); }
 
     //TODO implement network consensus here
 
@@ -373,6 +371,7 @@ async fn verify_faucet_request_independently(public_key: Vec<u8>, merkle_tree: A
  * verified by the entire network. This function is called by handle_faucet_request() after the faucet request has been verified.
  */
 async fn add_faucet_request_to_ledger(public_key: Vec<u8>, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) {
+
     // Lock the merkle tree and blockchain while updating account balances and writing blocks
     let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
     let mut blockchain_guard: MutexGuard<BlockChain> = blockchain.lock().await;
