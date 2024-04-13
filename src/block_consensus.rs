@@ -1,18 +1,16 @@
-use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio::io::AsyncWriteExt;
 use serde_json::Value;
 use serde_json; 
 use serde::{Serialize, Deserialize};
 use tokio::sync::Mutex;
 use std::sync::Arc;
-use tokio::io::Error as TokioIoError; // For handling async I/O errors
 use std::collections::HashMap;
 
 
-use crate::constants::{PORT_NUMBER, VERBOSE_STACK};
-use crate::network::NetworkConfig;
-use crate::network;
+use crate::constants::VERBOSE_STACK;
 use crate::validation;
+use crate::network;
 
 
 /**
@@ -100,7 +98,7 @@ pub async fn send_block_consensus_request( request: Value, validator_node: valid
     let json_msg: String = serde_json::to_string(&consensus_request).unwrap();
 
     // Collect all outbound ports to send message to
-    let outbound_ports: Vec<String> = collect_outbound_ports(self_port.clone()).await.unwrap();
+    let outbound_ports: Vec<String> = network::collect_outbound_ports(self_port.clone()).await.unwrap();
     for port in outbound_ports.iter() {
 
         // Only Send Messages to other ports
@@ -132,14 +130,14 @@ pub async fn determine_majority(request: Value, validator_node: validation::Vali
     if VERBOSE_STACK { println!("block_consensus::determine_majority() : Determining majority decision..."); }
 
     // get block decision from validator node
-    let peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>> = validator_node.peer_consensus_decisions.clone();
-    let client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>> = validator_node.client_block_decisions.clone();
+    let peer_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>> = validator_node.peer_decisions.clone();
+    let client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>> = validator_node.client_decisions.clone();
 
     // Hash request recieved by client. This will be used to ensure te same right
     let client_request_hash: Vec<u8> = network::hash_network_request(request).await;
 
     // get client decision from locked guard
-    let client_decision_guard = client_block_decisions.lock().await;
+    let client_decision_guard = client_decisions.lock().await;
     let client_decision: bool = client_decision_guard.get(&client_request_hash).unwrap().clone();
 
     // Lock mutex when accessing responses
@@ -152,12 +150,12 @@ pub async fn determine_majority(request: Value, validator_node: validation::Vali
     if client_decision { true_count += 1; } else { false_count += 1; }
 
     // Lock mutex and check if there are peer responces, get the counts for true and false decisions
-    let peer_responces_guard = peer_consensus_decisions.lock().await;
-    if peer_responces_guard.contains_key(&client_request_hash) {
+    let peer_decisions_guard = peer_decisions.lock().await;
+    if peer_decisions_guard.contains_key(&client_request_hash) {
 
         // if there are peer respencesget counts from locked guard
-        true_count += peer_responces_guard.get(&client_request_hash).unwrap().0;
-        false_count += peer_responces_guard.get(&client_request_hash).unwrap().1;
+        true_count += peer_decisions_guard.get(&client_request_hash).unwrap().0;
+        false_count += peer_decisions_guard.get(&client_request_hash).unwrap().1;
     } 
 
     // return the decision 
@@ -166,27 +164,6 @@ pub async fn determine_majority(request: Value, validator_node: validation::Vali
 }
 
 
-/**
- * @notice collect_outbound_ports() is an asynchronous function that reads the configuration file containing the accepted 
- * ports of the network. All ports that are not the port of the client are collected and returned as a vector of strings.
- */
-async fn collect_outbound_ports(self_port: String) -> Result<Vec<String>, TokioIoError> {
-
-    // Asynchronously load the accepted ports configuration file
-    let config_data = tokio::fs::read_to_string("accepted_ports.json").await?;
-
-    // Parse the configuration file into a Config struct
-    let config: NetworkConfig = serde_json::from_str(&config_data)
-        .map_err(|e| TokioIoError::new(std::io::ErrorKind::Other, format!("Failed to parse configuration file: {}", e)))?;
-
-    // Collect all outbound ports
-    let outbound_ports: Vec<String> = config.nodes.iter()
-        .map(|port| format!("{}:{}", port.address, port.port))
-        .filter(|port_address| port_address != &self_port)
-        .collect();
-
-    Ok(outbound_ports)
-}
 
 /**
  * @notice handle_block_consensus_request() is an asynchronous function that handles a block consensus request from another validator node.
@@ -203,9 +180,9 @@ pub async fn handle_block_consensus_request(request: Value, validator_node: vali
     let request_hash: Vec<u8> = request["request_hash"].as_str().unwrap().as_bytes().to_vec();
 
     // lock mutex and get client decision from validator node
-    let client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>= validator_node.client_block_decisions.clone();
-    let client_block_decisions_guard = client_block_decisions.lock().await;
-    let client_decision: bool = client_block_decisions_guard.get(&request_hash).unwrap().clone();   
+    let client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>= validator_node.client_decisions.clone();
+    let client_decisions_guard = client_decisions.lock().await;
+    let client_decision: bool = client_decisions_guard.get(&request_hash).unwrap().clone();   
 
     // Send response to client
     respond_to_block_consensus_request(request_hash, client_decision, self_port).await;
@@ -230,7 +207,7 @@ async fn respond_to_block_consensus_request( client_request_hash: Vec<u8>, clien
     let json_msg: String = serde_json::to_string(&consensus_responce).unwrap();
 
     // Collect all outbound ports
-    let outbound_ports: Vec<String> = collect_outbound_ports(self_port.clone()).await.unwrap();
+    let outbound_ports: Vec<String> = network::collect_outbound_ports(self_port.clone()).await.unwrap();
 
     for port in outbound_ports.iter() {
         println!("Port: {}", port);

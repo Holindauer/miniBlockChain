@@ -1,86 +1,85 @@
-use rand_core::block;
 use tokio::sync::{Mutex, MutexGuard};
 use tokio::runtime::Runtime;
 use serde_json::Value;
-use serde::Serialize;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 use std::collections::HashMap;
 
-// Import the necessary libraries
 use crate::blockchain;
-use crate::blockchain::{BlockChain, Request, Block};
+use crate::blockchain::{BlockChain, Request};
 use crate::merkle_tree::{MerkleTree, Account};
-use crate::constants::{VERBOSE_STACK, FAUCET_AMOUNT, WAIT_BEFORE_CONSENSUS_REQUEST, INTEGRATION_TEST};
+use crate::constants::{VERBOSE_STACK, FAUCET_AMOUNT};
 use crate::chain_consensus;
 use crate::block_consensus;
 use crate::zk_proof;
 use crate::network;
 
 /**
- * @notice validation.rs contains the logic for running a validator node. This involves setup and validation steps.
- * 
- * Setup:
- *    When a new validator node starts up, it must retrieve the current majority state of the blockchain and merkle tree and 
- *    store it locally. There are scenarios:
- * 
- *       1.) The node is starting a new blockchain from scratch. In this case, the node will create the genesis block and an
- *           empty merkle tree.
- * 
- *       2.) The node is joining an existing network. In this case, the node will send a request for the latest blockchain 
- *           and merkle tree state from all current peers in the network. The node will hash each blockchain and determine 
- *           the majority consensus of the network state based on the most common hash. The node will then update its local 
- *           blockchain to the majority chain and merkle tree.
- * 
- *    After the blockchain and merkle tree are up to date, the node will start listening for incoming connections from into 
- *    the network.
- * 
- * Validation:
- *    Once the node is listening for incoming connections on the specified port, It will spawn new tasks to handle each incoming 
- *    connection. Such connects could include requests for:
- * 
- *       - Account Creation 
- *       - Transaction
- *       - View Account Balance
- *       - Request for latest Blockchain and Merkle Tree
- * 
- *    TODO eventually, risc0 will be used to validate the correct execution of validator nodes. As well, staking/slashing and 
- *    TODO validator rewards will be need to be implemented at some point.
+ * @module validation.rs contains the necessary data structures for running a validator node, as well as the event handler logic for determining 
+ * the validity of incoming requests recieved by the validator node. The validator node is responsible for verifying the correctness on the client 
+ * side using the information known to the node. Then, once an indepdent decision is made, the node reaches out to peers for consensus on the 
+ * request. If the network reaches a consensus that the request is valid, the request will be added to the blockchain and merkle tree. Otherwise,
+ * the request will be rejected. Upon the  validation of a request, the update of the blockchain and merkle tree will also be performed within this 
+ * module.
  */
-
-
-
 /**
- * @notice ValidatorNode contains the local copies of the blockchain and merkle tree data structures that 
- * are maintained by independent validator nodes in the network.
- * @dev The blockchain and merkle tree are wrapped in Arc<Mutex> to allow for safe concurrent access between tasks.
+ * @struct The ValidatorNode struct contains the local ledger state of this validator node. A well as other datastructures used to fascilitate
+ * the validation process. All datastructures are wrapperd in Arc<Mutex<>> to allow for concurrent access by multiple tasks while avoiding race
+ * conditions.
+ * 
+ * @param blockchain: Arc<Mutex<BlockChain>> - The BlockChain struct is the ledger of all transactions that have occured on the network. It stores 
+ * a linked list of Block enum structs (see blockchain.rs for details on this implementation). As new transactions are verified, they are added to
+ * the blockchain.
+ * 
+ * @param merkle_tree: Arc<Mutex<MerkleTree>> - The merkle tree is a binary tree built built upwards from an iterable of account addresses that 
+ * stores the account balances of all users on the network. As the tree is assembled, nodes are hashed into each other to produce a single root hash
+ * that is used as unique identifier for the state of the stored accounts network at a given time.
+ * 
+ * @param client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>> - This hashmap stores the decisions made by the client regarding the validity of
+ * a given request. The key is the hash of the request and the value is a boolean representing the decision made by the client. This datastructure
+ * is updated following the result of the independent validation of a request by the client.
+ * 
+ * @param peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>> - This hashmap stores the decisions made by each peer validator node
+ * on the network regarding the validity of a given request. The key is the hash of the request and the value is a tuple of u32 integers representing
+ * the number of yays vs nays for the request collected by peers. Decisions within this datastructure are updated following the independent validation
+ * by the client. After this point, the client will send a request to the network for consensus on the request. Responces recieved from the network
+ * will be updated within this structure.
+ * 
+ * @param client_port_address: String - The port address that the client is listening on for incoming connections. This is used to establish a
+ * connection with the client from the network.
+ * 
+ * @param active_peers: Arc<Mutex<Vec<(String, u64)>>> - A vector of (String, u64) tuples containing the addresses of all active peers (as represented 
+ * by their port address) on the network and the timestamp of the last recieved heartbeat from this peer. This datastructure is maintained by the 
+ * validator node via a blocked on heartbeat protocol that listens for the periodic heartbeat of other nodes on the network. Nodes that fail to send a 
+ * heartbeat within a given time frame are removed from the active peers list.
  */
 #[derive(Clone)]
 pub struct ValidatorNode {
     pub blockchain: Arc<Mutex<BlockChain>>,
     pub merkle_tree: Arc<Mutex<MerkleTree>>,
-    pub peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>>, // request hash -> (decisions yay, decisions nay)
-    pub client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>, // request hash -> decision
+    pub peer_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>>, 
+    pub client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>,
     pub client_port_address: String,    
+    pub active_peers: Arc<Mutex<Vec<(String, u64)>>>, 
 }
 
-impl ValidatorNode {
-
-    // construct chain with empty block and empty merkle tree
+impl ValidatorNode { // initializes datastructures
     pub fn new() -> ValidatorNode {
         ValidatorNode { 
             blockchain: Arc::new(Mutex::new(BlockChain::new())),
             merkle_tree: Arc::new(Mutex::new(MerkleTree::new())),
-            peer_consensus_decisions: Arc::new(Mutex::new(HashMap::new())),
-            client_block_decisions: Arc::new(Mutex::new(HashMap::new())),
+            peer_decisions: Arc::new(Mutex::new(HashMap::new())),
+            client_decisions: Arc::new(Mutex::new(HashMap::new())),
             client_port_address: String::new(),
+            active_peers: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
 
 /**
- * @notice run_validation() is a wrapper called within main.rs that instigates the process of accessing
- * the network from the client side for running a validator node.
+ * @notice run_validation() is a wrapper called within main.rs that instigates the process of initializing the data structures in 
+ * the ValidatorNode struct, sending a request to active peer node for the majority state of the networks and connecting a TCP 
+ * listener to the network to start listening for incomring requests.
  */
 pub fn run_validation(private_key: &String) { // TODO implemnt private key/staking idea. Private key to send tokens to
     if VERBOSE_STACK { println!("\nvalidation::run_validation() : Booting up validator node..."); }
@@ -92,43 +91,33 @@ pub fn run_validation(private_key: &String) { // TODO implemnt private key/staki
     // Establish a new tokio runtime
     let rt = Runtime::new().unwrap(); 
 
-    // send request to peers to update to network majority blockchain state. 
+    // send request to peers to update to network majority blockchain state.  // ! Does this need to be blocked on?
     rt.block_on(async move { chain_consensus::update_local_blockchain(validator_node_clone).await; }); // TODO modify this to also update the merkle tree at bootup
 
     // listen for and process incoming request
     network::start_listening(validator_node.clone());
 } 
 
-
-
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // Account Creation Verification Logic
 
 /**
- * @notice handle_account_creation_request() is passed a JSON Value object that contains information regarding a new account creation
- * request. This function fascilitates the high level logic for verifying the request and adding the account to the ledger if it is 
- * found valid. This ivolves first, verifying the request independently, based on the information within the request with regards to 
- * the local state of the chain. Then, the function will send to the network for the independent decisions made by peer validator nodes.
- * If the network reaches a consensus that the request is valid, the account will be added to the ledger, otherwise nothing will happen. 
+ * @notice handle_account_creation_request() is an asynchronous event handler that is called by network::handle_incoming_message() following a
+ * recieved request for a new account creation. This function is responsible for fascilitating the independent validation of the request, sending
+ * a request to the network for consensus, and adding the account to the ledger if the network reaches a consensus that the request is valid. 
  */
 pub async fn handle_account_creation_request( request: Value, validator_node: ValidatorNode) -> Result<String, String> { 
     if VERBOSE_STACK { println!("validation::handle_account_creation_request() : Handling account creation...") };
 
-    // retrieve new public key sent with request as Vec<u8> UTF-8 encoded
-    let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
-    let obfuscated_private_key_hash: Vec<u8> = hex::decode(request["obfuscated_private_key_hash"].as_str().unwrap_or_default()).unwrap();
-
+    
     // perform independent vallidation and store decision in validator node struct
-    verify_account_creation_independently( public_key.clone(), request.clone(), validator_node.clone() ).await;
-
-    // wait 10 seconds for independent decisions to be made by peers
-    // tokio::time::sleep(WAIT_BEFORE_CONSENSUS_REQUEST).await;
+    verify_account_creation_independently(request.clone(), validator_node.clone()).await;
 
     // send for network consensus on the request
     block_consensus::send_block_consensus_request( request.clone(), validator_node.clone() ).await;
 
     // TODO MAKE SURE BLOCK CONSENSUS RESPONCE IS ACTUALLY BEING SENT 
 
-    // TODO As well as recieved
+    // TODO Heartbeat mechanism (to be implemented) should be checked here for who a response is expected from
 
     // Determine if the client's decision is the majority decision
     let peer_majority_decision: bool = block_consensus::determine_majority(request.clone(), validator_node.clone()).await;
@@ -137,7 +126,7 @@ pub async fn handle_account_creation_request( request: Value, validator_node: Va
     if (peer_majority_decision == false) { return Err("Network agreed the request was invalid".to_string());}
 
     // add the account to the ledger
-    add_account_creation_to_ledger( public_key.clone(), obfuscated_private_key_hash.clone(), validator_node.clone()).await;
+    add_account_creation_to_ledger(request.clone() ,validator_node.clone()).await;
 
     // Return validated public key as a string
     Ok(request["public_key"].as_str().unwrap_or_default().to_string())
@@ -145,15 +134,18 @@ pub async fn handle_account_creation_request( request: Value, validator_node: Va
 
 
 /**
- * @notice verify_account_creation_independently() is an asynchronous function that verifies the creation of a new account on the blockchain
- * based on the information that was recieved by this particular node in isolation. The resulting decision will be sent to all other validator
- * nodes to determine a majority decision that will be accepted by the network regardless of the individual validator node's decision. 
+ * @notice verify_account_creation_independently() performs the independent verification of an account creation request recieved by a validator node.
+ * First, the function checks that the account does not already exist in the merkle tree. If the account does not exist, the function will update the
+ * client block decisions hashmap with the decision to accept the request.
  */
-async fn verify_account_creation_independently( public_key: Vec<u8>, request: Value, validator_node: ValidatorNode) {
+async fn verify_account_creation_independently( request: Value, validator_node: ValidatorNode) {
+
+    // get public key from request
+    let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
 
     // clone the merkle tree and client block decisions from the validator node struct
     let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
-    let client_block_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>> = validator_node.client_block_decisions.clone();
+    let client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>> = validator_node.client_decisions.clone();
 
     // init client decision to false
     let decision: bool;
@@ -166,8 +158,8 @@ async fn verify_account_creation_independently( public_key: Vec<u8>, request: Va
     let client_request_hash: Vec<u8> = network::hash_network_request(request).await;
 
     // otherwise lock the client block decisions and update the client decision
-    let mut client_block_decisions_guard: MutexGuard<HashMap<Vec<u8>, bool>> = client_block_decisions.lock().await;
-    client_block_decisions_guard.insert(client_request_hash.clone(), decision);
+    let mut client_decisions_guard: MutexGuard<HashMap<Vec<u8>, bool>> = client_decisions.lock().await;
+    client_decisions_guard.insert(client_request_hash.clone(), decision);
 }
 
 /**
@@ -175,20 +167,18 @@ async fn verify_account_creation_independently( public_key: Vec<u8>, request: Va
  * verified by the entire network. This function is called by handle_account_creation_request() after the account creation request
  * has been verified.
  */
-async fn add_account_creation_to_ledger( public_key: Vec<u8>, obfuscated_private_key_hash: Vec<u8>, validator_node: ValidatorNode ) {
+async fn add_account_creation_to_ledger( request: Value, validator_node: ValidatorNode ) {
 
-    // clone the blockchain and merkle tree from the validator node struct
+    // Retrieve public key and obfuscated private key hash from request
+    let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
+    let obfuscated_private_key_hash: Vec<u8> = hex::decode(request["obfuscated_private_key_hash"].as_str().unwrap_or_default()).unwrap();
+
+    // Lock merkle tree for writing
     let merkel_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
-    let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();
-
-    // Lock the merkle tree and blockchain while updating account balances and writing blocks
     let mut merkel_tree_guard: MutexGuard<MerkleTree> = merkel_tree.lock().await;
-    let mut blockchain_guard: MutexGuard<BlockChain> = blockchain.lock().await;
 
     // Package account details in merkle_tree::Account struct and insert into merkle tree
-    let account = Account { 
-        public_key: public_key.clone(), obfuscated_private_key_hash,  balance: 0, nonce: 0, 
-    };
+    let account = Account { public_key: public_key.clone(), obfuscated_private_key_hash,  balance: 0, nonce: 0,};
 
     // Insert the account into the merkle tree
     merkel_tree_guard.insert_account(account);
@@ -199,6 +189,10 @@ async fn add_account_creation_to_ledger( public_key: Vec<u8>, obfuscated_private
 
     // Package request details in Request enum 
     let new_account_request = blockchain::Request::NewAccount { new_address: public_key, time: time, };
+
+    // Lock blockchain for writing
+    let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();    
+    let mut blockchain_guard: MutexGuard<BlockChain> = blockchain.lock().await;
 
     // Write the  acount creation in the blockchain
     blockchain_guard.store_incoming_requests(&new_account_request);
@@ -393,6 +387,10 @@ async fn add_faucet_request_to_ledger(request: Value, validator_node: ValidatorN
     blockchain_guard.store_incoming_requests(&new_account_request);
     blockchain_guard.push_request_to_chain(new_account_request);
 }
+
+
+
+
 
 
 /**

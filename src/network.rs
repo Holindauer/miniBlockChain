@@ -4,14 +4,19 @@ use std::fs;
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use tokio::runtime::Runtime;
-use tokio::io::AsyncReadExt;
+use tokio::sync::{Mutex, MutexGuard};
+use tokio::net::TcpStream;
+use tokio::io::Error as TokioIoError; 
+use tokio::io::{AsyncWriteExt, AsyncReadExt};
+use std::sync::Arc;
 use sha2::{Digest, Sha256};
 
 use crate::validation;
 use crate::validation::ValidatorNode;
-use crate::constants::{VERBOSE_STACK, INTEGRATION_TEST};
+use crate::constants::{VERBOSE_STACK, INTEGRATION_TEST, HEARTBEAT_PERIOD, HEARTBEAT_TIMEOUT};
 use crate::block_consensus;
 use crate::blockchain::{save_most_recent_block_json, print_chain_human_readable};
+
 
 /**
  * @notice network.rs contains functions related to generali configuration of the network
@@ -101,6 +106,9 @@ pub fn start_listening(validator_node: ValidatorNode) {
             Err(e) => { eprintln!("Refused to bind to any configured port: {}", e); return; }
         };       
 
+        // init time of last heartbeat signal
+        let mut last_heartbeat = std::time::Instant::now();
+
         // set the client port address in the validator node master struct 
         let mut validator_node = validator_node;
         validator_node.client_port_address = client_port_address.clone();
@@ -114,15 +122,18 @@ pub fn start_listening(validator_node: ValidatorNode) {
             // Spawn a new task to handle the incoming connection
             tokio::spawn(async move {
 
-            
-                // Read the incoming message from the socket
+                // Read the incoming message from the socket and sender to master handler
                 let mut buffer: Vec<u8> = Vec::new();
                 if socket.read_to_end(&mut buffer).await.is_ok() && !buffer.is_empty() {
-
-                    // Handle the incoming message
                     handle_incoming_message( &buffer, validator_node_clone).await; 
                 }
             });
+
+            // If the time since the last heartbeat signal is greater than HEARTBEAT_PERIOD, send a new heartbeat signal
+            if last_heartbeat.elapsed() > HEARTBEAT_PERIOD {
+                send_heartbeat(validator_node.clone()).await;
+                last_heartbeat = std::time::Instant::now(); // 
+            }
         }
     });
 }
@@ -196,6 +207,14 @@ async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode )
                     Err(e) => { eprintln!("Block Consensus Request Failed: {}", e); }
                 }
             },
+            Some("heartbeat") => { // Handle Heartbeat Request
+
+                println!("Heartbeat Request Recieved...");
+                match handle_heartbeat( request, validator_node.clone()).await {
+                    Ok(_) => { println!("Heartbeat Request Handled..."); },
+                    Err(e) => { eprintln!("Heartbeat Request Failed: {}", e); }
+                }
+            },
             _ => eprintln!("Unrecognized action: {:?}", request_action),
         }
     } else {eprintln!("Failed to parse message: {}", msg);}
@@ -213,4 +232,108 @@ pub async fn hash_network_request(request_struct_json: Value) -> Vec<u8> {
 
     // return finalized Vec<u8> hash
     hasher.finalize().to_vec()
+}
+
+/**
+ * @notice collect_outbound_ports() is an asynchronous function that reads the configuration file containing the accepted 
+ * ports of the network. All ports that are not the port of the client are collected and returned as a vector of strings.
+ */
+pub async fn collect_outbound_ports(self_port: String) -> Result<Vec<String>, TokioIoError> {
+
+    // Asynchronously load the accepted ports configuration file
+    let config_data = tokio::fs::read_to_string("accepted_ports.json").await?;
+
+    // Parse the configuration file into a Config struct
+    let config: NetworkConfig = serde_json::from_str(&config_data)
+        .map_err(|e| TokioIoError::new(std::io::ErrorKind::Other, format!("Failed to parse configuration file: {}", e)))?;
+
+    // Collect all outbound ports
+    let outbound_ports: Vec<String> = config.nodes.iter()
+        .map(|port| format!("{}:{}", port.address, port.port))
+        .filter(|port_address| port_address != &self_port)
+        .collect();
+
+    Ok(outbound_ports)
+}
+
+
+
+// @struct HeartBeat packages the information needed to send a heartbeat signal to the network that the node is still active.
+#[derive(Debug, Serialize, Deserialize)]
+struct HeartBeat{ action: String, port_address: String, }
+
+/**
+ * @notice send_heartbeat() is an asynchronous process that is blocked by start_listening() after the succesfull connection of a listener 
+ * to the network. A heartbeat signal is sent every constants::HEARTBEAT_PERIOD seconds to the network to indicate that the node is still 
+ * active and responces should be expected from the port_address in the HeartBeat msg folllowing a consensus request. 
+ */
+async fn send_heartbeat(validator_node: ValidatorNode){
+    if VERBOSE_STACK { println!("network::send_heartbeat() : Sending heartbeat signals to the network..."); }
+
+    // Establish a new tokio runtime
+    let rt = Runtime::new().unwrap();
+
+    // get client port
+    let client_port: String = validator_node.client_port_address.clone();
+
+    // Collect all outbound ports to send message to
+    let outbound_ports: Vec<String> = collect_outbound_ports(client_port.clone()).await.unwrap();
+
+    // send heartbeats to all ports not the client port
+    for port in outbound_ports.iter() {
+        if port != &client_port {
+
+                        
+            // Spawn a new task to send a heartbeat signal to the network
+            rt.block_on(async {
+
+                // Create a new HeartBeat struct and serialize to JSON
+                let heartbeat = HeartBeat{ action: "heartbeat".to_string(), port_address: client_port.clone() };
+                let heartbeat_json: String = serde_json::to_string(&heartbeat).unwrap();
+
+                // Create a new TcpStream to send the heartbeat signal
+                let mut stream = match TcpStream::connect(port).await {
+                    Ok(stream) => stream, Err(e) => { eprintln!("Failed to connect to port: {}", e); return; }
+                };
+
+                // Send the heartbeat signal
+                if let Err(e) = stream.write_all(heartbeat_json.as_bytes()).await {
+                    eprintln!("Failed to send heartbeat to port: {} -- There may not be a listener", port);
+                }
+            });
+         }
+     }
+}
+
+/**
+ * @notice handle_heartbeat_request() is an asynchronous function that handles incoming heartbeat requests from other nodes on the network.
+ */
+async fn handle_heartbeat(request: Value, validator_node: ValidatorNode) -> Result<(), String> {
+    if VERBOSE_STACK { println!("network::handle_heartbeat_request() : Handling incoming heartbeat request..."); }
+
+    // Extract the port address from the request
+    let port_address: String = request["port_address"].as_str()
+        .ok_or_else(|| "Failed to extract port address from heartbeat request".to_string())?
+        .to_string();
+
+    // Retrieve and lock the active_peers vector
+    let active_peers: Arc<Mutex<Vec<(String, u64)>>> = validator_node.active_peers.clone();
+    let mut active_peers = active_peers.lock().await;
+
+    // Get the current time
+    let current_time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "Failed to get current time".to_string())?
+        .as_secs();
+
+    // Update the timestamp for the peer that sent the heartbeat
+    for peer in &mut *active_peers {
+        if peer.0 == port_address {
+            peer.1 = current_time;
+        }
+    }
+
+    // Remove peers that have not sent a heartbeat within the HEARTBEAT_TIMEOUT
+    active_peers.retain(|peer| current_time - peer.1 < HEARTBEAT_TIMEOUT.as_secs());
+
+    Ok(())
 }
