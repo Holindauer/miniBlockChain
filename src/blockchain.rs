@@ -3,6 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::{HashMap, VecDeque};
 use std::{fs::File, io::{self, Read}, path::Path};
 use serde::{Serialize, Deserialize};
+use tokio::sync::{Mutex, MutexGuard};
+use std::sync::Arc;
 
 use crate::constants::VERBOSE_STACK;
 
@@ -331,6 +333,100 @@ impl BlockChain {
     }
 
 }
+
+
+/**
+ * @notice print_chain() is an asynchronous function that prints the current state of the blockchain as maintained on the 
+ * client side. This function is called by verify_account_creation() and verify_transaction() after storing the request in the 
+ * blockchain.
+ */
+pub async fn print_chain_human_readable(blockchain: Arc<Mutex<BlockChain>>) { 
+
+    // lock blockchain mutex for printing
+    let blockchain_guard: MutexGuard<'_, BlockChain> = blockchain.lock().await; 
+
+    println!("\nCurrent State of Blockchain as Maintained on Client Side:");
+    for (i, block) in blockchain_guard.chain.iter().enumerate() {
+        match block {
+            Block::NewAccount { address, time, hash } => {
+                
+                // Directly use address as it's already a UTF-8 encoded hex string
+                let hash_hex = hex::encode(hash); // Assuming hash is a Vec<u8> needing encoding
+                let address = String::from_utf8(address.clone()).unwrap();
+                println!("\nBlock {}: \n\tNew Account: {}\n\tTime: {}\n\tHash: {}", i, address, time, hash_hex);
+            },
+            Block::Transaction { sender, sender_nonce, recipient, amount, time, hash } => {
+
+                // Directly use sender and recipient as they're already UTF-8 encoded hex strings
+                let hash_hex = hex::encode(hash); // Assuming hash is a Vec<u8> needing encoding
+                let sender = String::from_utf8(sender.clone()).unwrap();
+                let recipient = String::from_utf8(recipient.clone()).unwrap();
+
+                println!("\nBlock {}: \n\tSender: {}\n\tSender Nonce: {}\n\tRecipient: {}\n\tAmount: {}\n\tTime: {:}\n\tHash: {}", i, sender, sender_nonce, recipient, amount, time, hash_hex);
+            },
+            Block::Genesis { time } => {
+                println!("\nBlock {}: \n\tGenesis Block\n\tTime: {:?}", i, time);
+            },
+            Block::Faucet { address, time, hash } => {
+                
+                // Directly use address as it's already a UTF-8 encoded hex string
+                let hash_hex = hex::encode(hash); // Assuming hash is a Vec<u8> needing encoding
+                let address = String::from_utf8(address.clone()).unwrap();
+                println!("\nBlock {}: \n\tFaucet Request: {}\n\tTime: {}\n\tHash: {}", i, address, time, hash_hex);
+            },
+        }
+    }
+}
+
+/**
+ * @notice save_most_recent_block_json() is an asynchronous function that saves the most recent block in the 
+ * blockchain as a JSON file. This function is used to save the most recent block during integration testing.
+ */
+#[derive(Serialize)]
+#[serde(untagged)]
+enum BlockJson {
+    Genesis { time: u64 },
+    Transaction { sender: String, recipient: String, amount: u64, time: u64, sender_nonce: u64, hash: String, },
+    NewAccount {address: String, time: u64, hash: String, },
+}
+
+/**
+ * @notice save_most_recent_block_json() is an asynchronous function that saves the most recent block in the
+ * blockchain as a JSON file. This function is used to save the most recent block during integration testing.
+ */
+pub async fn save_most_recent_block_json(blockchain: Arc<Mutex<BlockChain>>) {
+    let blockchain_guard: MutexGuard<'_, BlockChain> = blockchain.lock().await;
+
+    if let Some(most_recent_block) = blockchain_guard.chain.last() {
+        let block_json = match most_recent_block {
+            Block::Genesis { time } => BlockJson::Genesis { time: *time },
+            Block::Transaction { sender, recipient, amount, time, sender_nonce, hash } => BlockJson::Transaction {
+                sender: String::from_utf8(sender.clone()).unwrap_or_default(),
+                recipient: String::from_utf8(recipient.clone()).unwrap_or_default(),
+                amount: *amount,
+                time: *time,
+                sender_nonce: *sender_nonce,
+                hash: hex::encode(hash),
+            },
+            Block::NewAccount { address, time, hash } => BlockJson::NewAccount {
+                address: String::from_utf8(address.clone()).unwrap_or_default(),
+                time: *time,
+                hash: hex::encode(hash),
+            },
+            Block::Faucet { address, time, hash } => BlockJson::NewAccount {
+                address: String::from_utf8(address.clone()).unwrap_or_default(),
+                time: *time,
+                hash: hex::encode(hash),
+            },
+        };
+        let message_json = serde_json::to_string(&block_json).unwrap();
+        std::fs::write("most_recent_block.json", message_json).unwrap();
+    } else {
+        eprintln!("Blockchain is empty.");
+    }
+}
+
+
 
 /**
  * @test the following tests are used to verify the functionality of the blockchain struct.

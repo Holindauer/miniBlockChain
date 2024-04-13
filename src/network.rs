@@ -11,6 +11,7 @@ use crate::validation;
 use crate::validation::ValidatorNode;
 use crate::constants::{VERBOSE_STACK, INTEGRATION_TEST};
 use crate::block_consensus;
+use crate::blockchain::{save_most_recent_block_json, print_chain_human_readable};
 
 /**
  * @notice network.rs contains functions related to generali configuration of the network
@@ -77,8 +78,6 @@ pub async fn try_bind_to_ports() -> Result<(TcpListener, String), IoError> {
 
     Err(last_error.unwrap_or_else(|| IoError::new(std::io::ErrorKind::Other, "No ports available")))
 }
-
-
 
 
 /**
@@ -150,8 +149,8 @@ async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode )
                 match validation::handle_account_creation_request( request, validator_node.clone() ).await {  
 
                     Ok(public_key) => { // upon succesfull account creation, print blockchain state, save most recent block for integration testing
-                        if VERBOSE_STACK { validation::print_chain_human_readable(validator_node.blockchain.clone()).await;}  
-                        if INTEGRATION_TEST { validation::save_most_recent_block_json(validator_node.blockchain.clone()).await; } // TODO move these functions out of the validation module and into the blockchain module
+                        if VERBOSE_STACK { print_chain_human_readable(validator_node.blockchain.clone()).await;}  
+                        if INTEGRATION_TEST { save_most_recent_block_json(validator_node.blockchain.clone()).await; } // TODO move these functions out of the validation module and into the blockchain module
                     },
                     Err(e) => {eprintln!("Account creation Invalid: {}", e);}
                 }
@@ -163,13 +162,13 @@ async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode )
     
                         // upon succesfull transaction, print blockchain state or indicate transaction refusall
                         if VERBOSE_STACK {
-                            if success { validation::print_chain_human_readable(validator_node.blockchain.clone()).await;}
+                            if success { print_chain_human_readable(validator_node.blockchain.clone()).await;}
                             else { eprintln!("Transaction failed to verify"); }
                         }                       
     
                         // if doing an integration test, save the most recent block as a json file
                         if INTEGRATION_TEST { 
-                            validation::save_most_recent_block_json(validator_node.blockchain.clone()).await;
+                            save_most_recent_block_json(validator_node.blockchain.clone()).await;
                             if !success { validation::save_failed_transaction_json().await; }
                         } 
                     },
@@ -182,8 +181,8 @@ async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode )
                     Ok(_) => { 
 
                         // upon succesfull faucet request, print blockchain state
-                        if VERBOSE_STACK { validation::print_chain_human_readable(validator_node.blockchain.clone()).await;} 
-                        if INTEGRATION_TEST { validation::save_most_recent_block_json(validator_node.blockchain.clone()).await; } // save latest block for integration testing
+                        if VERBOSE_STACK { print_chain_human_readable(validator_node.blockchain.clone()).await;} 
+                        if INTEGRATION_TEST { save_most_recent_block_json(validator_node.blockchain.clone()).await; } // save latest block for integration testing
                     },
                     Err(e) => { eprintln!("Faucet request failed: {}", e); }
                 }
