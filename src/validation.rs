@@ -1,3 +1,4 @@
+use rand_core::block;
 use tokio::sync::{Mutex, MutexGuard};
 use tokio::runtime::Runtime;
 use serde_json::Value;
@@ -122,11 +123,18 @@ pub async fn handle_account_creation_request( request: Value, validator_node: Va
     // wait 10 seconds for independent decisions to be made by peers
     // tokio::time::sleep(WAIT_BEFORE_CONSENSUS_REQUEST).await;
 
-    // get network consensus on the request
-    let peer_decision: bool = block_consensus::send_block_consensus_request( request.clone(), validator_node.clone() ).await;
+    // send for network consensus on the request
+    block_consensus::send_block_consensus_request( request.clone(), validator_node.clone() ).await;
+
+    // TODO MAKE SURE BLOCK CONSENSUS RESPONCE IS ACTUALLY BEING SENT 
+
+    // TODO As well as recieved
+
+    // Determine if the client's decision is the majority decision
+    let peer_majority_decision: bool = block_consensus::determine_majority(request.clone(), validator_node.clone()).await;
 
     // return error if network consensus not reached
-    if (peer_decision == false) { return Err("Network agreed the request was invalid".to_string());}
+    if (peer_majority_decision == false) { return Err("Network agreed the request was invalid".to_string());}
 
     // add the account to the ledger
     add_account_creation_to_ledger( public_key.clone(), obfuscated_private_key_hash.clone(), validator_node.clone()).await;
@@ -209,58 +217,40 @@ async fn add_account_creation_to_ledger( public_key: Vec<u8>, obfuscated_private
 pub async fn handle_transaction_request(request: Value, validator_node: ValidatorNode) -> Result<bool, String> { // TODO Simplify/decompose this function
     if VERBOSE_STACK { println!("validation::verify_transaction() : Transaction verification master function...") };
 
-    // retrieve transaction details from request
-    let sender_address: Vec<u8> = request["sender_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
-    let recipient_address: Vec<u8> = request["recipient_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
-    let amount: u64 = request["amount"].as_str().unwrap_or_default().parse().unwrap_or_default();
-
-    // retrieve sender obfuscated private key parts
-    let curve_point1: String = request["sender_obfuscated_private_key_part1"].as_str().unwrap_or_default().to_string(); 
-    let curve_point2: String = request["sender_obfuscated_private_key_part2"].as_str().unwrap_or_default().to_string();
-
-    // verify the transaction independently 
-    if verify_transaction_independently(
-        sender_address.clone(), 
-        recipient_address.clone(), 
-        amount,
-        curve_point1,
-        curve_point2,
-        validator_node.merkle_tree.clone()
-    ).await != true { return Ok(false); }
+    // verify the transaction independently // TODO modify this to adjust the client decision map instead of returning an Option
+    if verify_transaction_independently(request.clone(), validator_node.clone()).await != true {return Ok(false); }
 
     // TODO implement network consensus here
 
     // add the transaction to the ledger
-    add_transaction_to_ledger(
-        sender_address, 
-        recipient_address, 
-        amount, 
-        validator_node.merkle_tree.clone(), 
-        validator_node.blockchain.clone()
-    ).await;
+    add_transaction_to_ledger(request.clone(), validator_node.clone()).await;
 
     Ok(true) 
 }
 
 /**
- * @notice verify_transaction_independently() is an asynchronous function that performs the verification of a transaction
- * request recieved by a validator node. This function determines the decision of whether or not to accept the transaction
- * based on the information that was recieved by this particular node in isolation. The resulting decision will be sent to 
- * all other validator nodes to determine a majority decision. 
+ * @notice verify_transaction_independently() is an asynchronous function that performs the independent verification of a transaction
+ * request recieved by a validator node. The decision of whether to accept the transaction is based on the information that was recieved by 
+ * this particular node in isolation. The resulting decision will be sent to all other validator nodes to determine a majority decision. 
  * @dev the checks this function performs include: verifying the sender's private key (using zk_proof module), ensuruing 
  * the sender and recipient accounts both exist in the merkle tree, and that the sender has sufficient balance to send the
  * transaction.
  */
-async fn verify_transaction_independently(
-    sender_address: Vec<u8>,  // public keys
-    recipient_address: Vec<u8>, 
-    transaction_amount: u64, 
-    curve_point_1: String,  // obfuscated private key parts for zk proof scheme
-    curve_point_2: String, 
-    merkle_tree: Arc<Mutex<MerkleTree>>
-) -> bool {
+async fn verify_transaction_independently(request: Value, validator_node: ValidatorNode) -> bool {
+
+    // retrieve sender and recipient addresses from request
+    let sender_address: Vec<u8> = request["sender_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
+    let recipient_address: Vec<u8> = request["recipient_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
+
+    // retrieve transaction amount from request
+    let transaction_amount: u64 = request["amount"].as_str().unwrap_or_default().parse().unwrap_or_default();
+ 
+    // retrieve sender obfuscated private key parts from the request
+    let curve_point_1: String = request["sender_obfuscated_private_key_part1"].as_str().unwrap_or_default().to_string(); 
+    let curve_point_2: String = request["sender_obfuscated_private_key_part2"].as_str().unwrap_or_default().to_string();
 
     // Lock the merkle tree while accessing sender account info
+    let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
     let merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
 
     // Check that the both accounts already exist
@@ -283,36 +273,43 @@ async fn verify_transaction_independently(
  * @notice add_transaction_to_ledger() is an asynchronous function that adds a transaction after it has been verified by the 
  * entire network to both the merkle tree and the blockchain. 
 */
-async fn add_transaction_to_ledger(
-    sender_address: Vec<u8>, 
-    recipient_address: Vec<u8>, 
-    amount: u64, 
-    merkle_tree: Arc<Mutex<MerkleTree>>, 
-    blockchain: Arc<Mutex<BlockChain>>
-){
+async fn add_transaction_to_ledger(request: Value, validator_node: ValidatorNode) {
 
-    // Lock the merkle tree and blockchain while updating account balances and writing blocks
+    // get the sender and recipient addresses from the request
+    let sender_address: Vec<u8> = request["sender_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
+    let recipient_address: Vec<u8> = request["recipient_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
+    
+    // get the transaction amount from the request
+    let amount: u64 = request["amount"].as_str().unwrap_or_default().parse().unwrap_or_default();
+
+    // retrieve and lock the merkle tree 
+    let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
     let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
-    let mut blockchain_guard: MutexGuard<BlockChain> = blockchain.lock().await;
 
-    // retrieve account detials from the merkle tree relavant to the tranasaction
+    // retrieve the sender and recipient balances from the merkle tree
     let mut sender_balance: u64 = merkle_tree_guard.get_account_balance(sender_address.clone()).unwrap();
     let mut recipient_balance: u64 = merkle_tree_guard.get_account_balance(recipient_address.clone()).unwrap();
+
+    // retrieve the sender's nonce and the current time
     let sender_nonce: u64 = merkle_tree_guard.get_nonce(sender_address.clone()).unwrap();
     let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
     // determine new account balances
     sender_balance -= amount; recipient_balance += amount;
 
-    // Change account balancges in the merkle tree 
+    // Change account balances in the merkle tree to the ones updated
     merkle_tree_guard.change_balance(sender_address.clone(), sender_balance);
     merkle_tree_guard.increment_nonce(sender_address.clone());
     merkle_tree_guard.change_balance(recipient_address.clone(), recipient_balance);
     
     // Package request details in Request enum 
-    let new_account_request = blockchain::Request::Transaction { 
+    let new_account_request = blockchain::Request::Transaction {  // TODO this could probably just be replaced by the request object
         sender_address, sender_nonce, recipient_address, amount, time, 
     };
+
+    // Retrieve and lock the blockchain
+    let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();
+    let mut blockchain_guard: MutexGuard<BlockChain> = blockchain.lock().await;
 
     // Write a new block to the blockchain
     blockchain_guard.store_incoming_requests(&new_account_request);
@@ -330,22 +327,15 @@ async fn add_transaction_to_ledger(
 pub async fn handle_faucet_request(request: Value, validator_node: ValidatorNode) -> Result<(), String> {
     if VERBOSE_STACK { println!("validation::verify_faucet_request() : Verifying faucet request...") };
 
-    // Check that the account exist
-    let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
-
     // verify the faucet request independently
-    if verify_faucet_request_independently(
-        public_key.clone(), validator_node.merkle_tree.clone()
-    ).await != true { return Err("Account doesn't exists".to_string()); }
+    if verify_faucet_request_independently(request.clone(), validator_node.clone()).await != true { 
+        return Err("Account doesn't exists".to_string()); 
+    }
 
     //TODO implement network consensus here
 
     // add the faucet request to the ledger
-    add_faucet_request_to_ledger(
-        public_key.clone(), 
-        validator_node.merkle_tree.clone(), 
-        validator_node.blockchain.clone()
-    ).await;
+    add_faucet_request_to_ledger(request.clone(), validator_node.clone()).await;
 
     Ok(())
 }
@@ -355,26 +345,34 @@ pub async fn handle_faucet_request(request: Value, validator_node: ValidatorNode
  * based on the information that was recieved by this particular node in isolation. The resulting decision will be sent to all other
  * validator nodes to determine a majority decision that will be accepted by the network regardless of the individual validator node's decision.
  */
-async fn verify_faucet_request_independently(public_key: Vec<u8>, merkle_tree: Arc<Mutex<MerkleTree>>) -> bool {
+async fn verify_faucet_request_independently(request: Value, validator_node: ValidatorNode) -> bool {
 
     // Lock the merkle tree while accessing sender account info
+    let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
     let merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
+
+    // Get the public key requesting the faucet
+    let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
 
     // Check that the account doesnt already exist in the tree
     if !merkle_tree_guard.account_exists(public_key.clone()) { return false; }
 
-    true
+    true // TODO eventually this will need to be replaced with an update to the client_decision_mapS
 }
 
 /**
  * @notice add_faucet_request_to_ledger() is an asynchronous function that adds a faucet request to the ledger after it has been
  * verified by the entire network. This function is called by handle_faucet_request() after the faucet request has been verified.
  */
-async fn add_faucet_request_to_ledger(public_key: Vec<u8>, merkle_tree: Arc<Mutex<MerkleTree>>, blockchain: Arc<Mutex<BlockChain>>) {
+async fn add_faucet_request_to_ledger(request: Value, validator_node: ValidatorNode) {
 
-    // Lock the merkle tree and blockchain while updating account balances and writing blocks
+
+    // Lock the merkle tree for writing
+    let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
     let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
-    let mut blockchain_guard: MutexGuard<BlockChain> = blockchain.lock().await;
+
+    // get the public key from the request
+    let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
 
     // get the account balance and update it
     let account_balance: u64 = merkle_tree_guard.get_account_balance(public_key.clone()).unwrap();
@@ -387,6 +385,10 @@ async fn add_faucet_request_to_ledger(public_key: Vec<u8>, merkle_tree: Arc<Mute
     let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
     let new_account_request: Request = Request::Faucet { address: public_key, time: time, };
     
+    // Lock blockchain for writing
+    let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();
+    let mut blockchain_guard: MutexGuard<BlockChain> = blockchain.lock().await;
+
     // store and validate the request
     blockchain_guard.store_incoming_requests(&new_account_request);
     blockchain_guard.push_request_to_chain(new_account_request);

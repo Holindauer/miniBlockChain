@@ -79,7 +79,7 @@ struct BlockConsensusResponse {
  * stored them in the peer_consensus_decisions arc mutex hash map. These responces will accessed by the determine_majority() function to determine
  * the majority decision of the network.
 */
-pub async fn send_block_consensus_request( request: Value, validator_node: validation::ValidatorNode ) -> bool {
+pub async fn send_block_consensus_request( request: Value, validator_node: validation::ValidatorNode )  {
     if VERBOSE_STACK { println!("block_consensus::send_block_consensus_request() : Preparing block consensus request..."); }
 
 
@@ -120,12 +120,7 @@ pub async fn send_block_consensus_request( request: Value, validator_node: valid
                 Err(_) => { println!("block_consensus::send_block_consensus_request() : Failed to connect to {}, There may not be a listener...", port); }
             }
         }
-    }   
-    
-    // Determine if the client's decision is the majority decision
-    let majority_decision: bool = determine_majority(request.clone(), validator_node.clone()).await;
-
-    majority_decision
+    }       
 }
 
 
@@ -133,7 +128,7 @@ pub async fn send_block_consensus_request( request: Value, validator_node: valid
  * @notice determine_majority() is an asynchronous function that determines the majority decision of the network based on the 
  * responses recieved from other validator nodes. Pre collected responces from the peer_consensus_decisions arc mutex hash map.
  */
-async fn determine_majority(request: Value, validator_node: validation::ValidatorNode) -> bool {
+pub async fn determine_majority(request: Value, validator_node: validation::ValidatorNode) -> bool {
     if VERBOSE_STACK { println!("block_consensus::determine_majority() : Determining majority decision..."); }
 
     // get block decision from validator node
