@@ -54,13 +54,6 @@ use crate::network;
  */
 
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
- struct BlockConsensusRequest{ 
-    action: String, 
-    request_hash: Vec<u8>,
-    resonse_port: String,
-}
-
  #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BlockConsensusResponse {
     action: String,
@@ -69,59 +62,6 @@ struct BlockConsensusResponse {
 }
 
  
-
-/**
- * @notice send_block_consensus_request() asynchronously sends a request to all other validator nodes for their decision on whether or not to 
- * accept a new block into the blockchain. The function uses the hash of the request recieved by the client as a unique identifier in the request
- * sent to other nodes. Recieved responces will be handled by the main listener loop in validation module. Which will collect the responces and
- * stored them in the peer_consensus_decisions arc mutex hash map. These responces will accessed by the determine_majority() function to determine
- * the majority decision of the network.
-*/
-pub async fn send_block_consensus_request( request: Value, validator_node: validation::ValidatorNode )  {
-    if VERBOSE_STACK { println!("block_consensus::send_block_consensus_request() : Preparing block consensus request..."); }
-
-
-    // extract the port number form the validator node
-    let self_port: String = validator_node.client_port_address.clone();
-
-    // get hash of request recieved by client, (used as key)
-    let client_request_hash: Vec<u8> = network::hash_network_request(request.clone()).await;
-
-    // Package peer request in struct and serialize to JSON
-    let consensus_request = BlockConsensusRequest {
-        action: "block_consensus".to_string(),
-        request_hash: client_request_hash.clone(),
-        resonse_port: self_port.clone()
-    };
-
-    // Serialize request to JSON
-    let json_msg: String = serde_json::to_string(&consensus_request).unwrap();
-
-    // Collect all outbound ports to send message to
-    let outbound_ports: Vec<String> = network::collect_outbound_ports(self_port.clone()).await.unwrap();
-    for port in outbound_ports.iter() {
-
-        // Only Send Messages to other ports
-        if port != &self_port {
-            if VERBOSE_STACK { println!("send_block_consensus_request() : Sending block consensus request to: {}", port); } 
-
-            // Connect to port and send message  
-            match TcpStream::connect(port).await {
-
-                // Send message to port if connection is successful
-                Ok(mut stream) => {
-                    if let Err(e) = stream.write_all(json_msg.as_bytes()).await { eprintln!("Failed to send message to {}: {}", port, e); }
-                    if VERBOSE_STACK { println!("send_block_consensus_request() : Sending block consensus request to: {}", port); } 
-                },
-
-                // Print error message if connection fails
-                Err(_) => { println!("block_consensus::send_block_consensus_request() : Failed to connect to {}, There may not be a listener...", port); }
-            }
-        }
-    }       
-}
-
-
 /**
  * @notice determine_majority() is an asynchronous function that determines the majority decision of the network based on the 
  * responses recieved from other validator nodes. Pre collected responces from the peer_consensus_decisions arc mutex hash map.

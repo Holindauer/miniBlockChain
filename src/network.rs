@@ -18,8 +18,9 @@ use sha2::{Digest, Sha256};
 use crate::validation;
 use crate::validation::ValidatorNode;
 use crate::constants::{VERBOSE_STACK, INTEGRATION_TEST, HEARTBEAT_PERIOD, HEARTBEAT_TIMEOUT};
-use crate::block_consensus;
+use crate::consensus;
 use crate::blockchain::{save_most_recent_block_json, print_chain_human_readable};
+use crate::requests;
 
 
 /**
@@ -128,9 +129,6 @@ pub async fn start_listening(validator_node: ValidatorNode) {
     }
 }
 
-// @struct HeartBeat packages the information needed to send a heartbeat signal to the network that the node is still active.
-#[derive(Debug, Serialize, Deserialize)]
-struct HeartBeat{ action: String, port_address: String, }
 
 /**
  * @notice send_heartbeat_periodically() is an asynchronous function that 
@@ -140,39 +138,10 @@ async fn send_heartbeat_periodically(validator_node: ValidatorNode) {
     let mut interval = time::interval(HEARTBEAT_PERIOD);
     loop {
         interval.tick().await;
-        send_heartbeat(validator_node.clone()).await;
+        requests::send_heartbeat_request(validator_node.clone()).await;
     }
 }
 
-/**
- * @notice send_heartbeat() is an asynchronous process that is blocked by start_listening() after the succesfull connection of a listener 
- * to the network. A heartbeat signal is sent every constants::HEARTBEAT_PERIOD seconds to the network to indicate that the node is still 
- * active and responces should be expected from the port_address in the HeartBeat msg folllowing a consensus request. 
- */
-async fn send_heartbeat(validator_node: ValidatorNode) {
-    if VERBOSE_STACK { println!("network::send_heartbeat() : Sending heartbeat signals to the network..."); }
-
-    // get client port and outbound ports
-    let client_port: String = validator_node.client_port_address.clone();
-    let outbound_ports: Vec<String> = collect_outbound_ports(client_port.clone()).await.unwrap();
-
-    // Send a heartbeat to each outbound port that is not the client port
-    for port in outbound_ports.iter() {
-        if port != &client_port {
-
-            // package and serialize the heartbeat signal
-            let heartbeat = HeartBeat { action: "heartbeat".to_string(), port_address: client_port.clone() };
-            let heartbeat_json: String = serde_json::to_string(&heartbeat).unwrap();
-
-            // Attempt to connect to the port and send the heartbeat
-            if let Ok(mut stream) = TcpStream::connect(port).await {
-                if let Err(e) = stream.write_all(heartbeat_json.as_bytes()).await {
-                    eprintln!("Failed to send heartbeat to port: {} -- There may not be a listener", port);
-                }
-            } else { eprintln!("Failed to connect to port: {}", port); }
-        }
-    }
-}
 
 /**
  * @notice handle_incoming_message() asynchronously accepts a msg buffer and the current state of the merkle tree 
@@ -191,7 +160,7 @@ async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode )
         // Determine the action to take based on the request
         match request_action {
 
-            Some("make") => { // Handle Request to Make New Account
+            Some("AccountCreation") => { // Handle Request to Make New Account
                 
                 match validation::handle_account_creation_request( request, validator_node.clone() ).await {  
 
@@ -202,7 +171,7 @@ async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode )
                     Err(e) => {eprintln!("Account creation Invalid: {}", e);}
                 }
             },
-            Some("transaction") => { // Handle Request to Make New Transaction
+            Some("Transaction") => { // Handle Request to Make New Transaction
                 
                 match validation::handle_transaction_request(request, validator_node.clone()).await {
                     Ok(success) => {
@@ -222,7 +191,7 @@ async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode )
                     Err(e) => {eprintln!("Transaction Validation Error: {}", e);}
                 }
             },
-            Some("faucet") => { // Handle Request to Use Faucet
+            Some("Faucet") => { // Handle Request to Use Faucet
                                     
                 match validation::handle_faucet_request(request, validator_node.clone()).await {
                     Ok(_) => { 
@@ -235,15 +204,15 @@ async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode )
                 }
 
             },
-            Some("block_consensus") => { // Handle New Block Decision Request
+            Some("Consensus") => { // Handle New Block Decision Request
 
                 println!("Block Consensus Request Recieved...");
-                match block_consensus::handle_block_consensus_request( request, validator_node.clone()).await {
+                match consensus::handle_block_consensus_request( request, validator_node.clone()).await {
                     Ok(_) => { println!("Block Consensus Request Handled..."); },
                     Err(e) => { eprintln!("Block Consensus Request Failed: {}", e); }
                 }
             },
-            Some("heartbeat") => { // Handle Heartbeat Request
+            Some("HeartBeat") => { // Handle Heartbeat Request
 
                 println!("Heartbeat Request Recieved...");
                 match handle_heartbeat( request, validator_node.clone()).await {
@@ -291,9 +260,6 @@ pub async fn collect_outbound_ports(self_port: String) -> Result<Vec<String>, To
 
     Ok(outbound_ports)
 }
-
-
-
 
 /**
  * @notice handle_heartbeat_request() is an asynchronous function that handles incoming heartbeat requests from other nodes on the network.

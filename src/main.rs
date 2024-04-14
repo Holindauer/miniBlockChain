@@ -4,7 +4,7 @@ mod merkle_tree;
 mod zk_proof;
 mod constants;
 mod chain_consensus;
-mod block_consensus;
+mod consensus;
 mod network;
 mod requests;
 

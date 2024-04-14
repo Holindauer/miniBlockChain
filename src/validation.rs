@@ -10,9 +10,10 @@ use crate::blockchain::{BlockChain, Request};
 use crate::merkle_tree::{MerkleTree, Account};
 use crate::constants::{VERBOSE_STACK, FAUCET_AMOUNT};
 use crate::chain_consensus;
-use crate::block_consensus;
+use crate::consensus;
 use crate::zk_proof;
 use crate::network;
+use crate::requests;
 
 /**
  * @module validation.rs contains the necessary data structures for running a validator node, as well as the event handler logic for determining 
@@ -108,14 +109,14 @@ pub async fn handle_account_creation_request( request: Value, validator_node: Va
     verify_account_creation_independently(request.clone(), validator_node.clone()).await;
 
     // send for network consensus on the request
-    block_consensus::send_block_consensus_request( request.clone(), validator_node.clone() ).await;
+    requests::send_consensus_request( request.clone(), validator_node.clone() ).await;
 
     // TODO MAKE SURE BLOCK CONSENSUS RESPONCE IS ACTUALLY BEING SENT 
 
     // TODO Heartbeat mechanism (to be implemented) should be checked here for who a response is expected from
 
     // Determine if the client's decision is the majority decision
-    let peer_majority_decision: bool = block_consensus::determine_majority(request.clone(), validator_node.clone()).await;
+    let peer_majority_decision: bool = consensus::determine_majority(request.clone(), validator_node.clone()).await;
 
     // return error if network consensus not reached
     if (peer_majority_decision == false) { return Err("Network agreed the request was invalid".to_string());}
