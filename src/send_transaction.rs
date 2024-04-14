@@ -8,12 +8,12 @@ use serde::{Serialize, Deserialize};
 use serde_json;
 
 use base64;
-use std::io;
 
-use secp256k1::{Secp256k1, SecretKey, PublicKey};
+use std::{io, fs};
 
 use crate::zk_proof;
-use crate::constants::{PORT_NUMBER, VERBOSE_STACK};
+use crate::constants::VERBOSE_STACK;
+use crate::network::NetworkConfig;
 
 /**
  * @notice send_tranasaction.rs contains the logic for sending a network to request a transaction of value between two
@@ -58,74 +58,48 @@ use crate::constants::{PORT_NUMBER, VERBOSE_STACK};
      pub amount: String,
 }
  
-/**
- * @notice send_transaction() is a wrapper called within main.rs that instigates the process of accessing
- * the network from the client side for sending a transaction request. 
- * @dev the provided keys are hexadecimal strings and the amount is string integer
- */
-pub fn send_transaction(
-    sender_private_key: &String, 
-    recipient_public_key: 
-    &String, 
-    amount: &String ) { 
-        if VERBOSE_STACK { println!("send_transaction::send_transaction() : Sending transaction request...") };
 
-        // Create a new Tokio runtime 
-        let rt = tokio::runtime::Runtime::new().unwrap();
 
-        // derive the sender's public key from the private key
-        let secp  = Secp256k1::new();
-        let secret_key = SecretKey::from_slice(&hex::decode(sender_private_key).unwrap()).unwrap();
-        let public_key = PublicKey::from_secret_key(&secp, &secret_key);
-        let sender_public_key = hex::encode(public_key.serialize());
-
-        // block_on the async account creation process, display the results   
-        match rt.block_on(send_transaction_request(
-            sender_public_key.to_string(), 
-            sender_private_key.to_string(), 
-            recipient_public_key.to_string(), 
-            amount.to_string())
-        ) 
-        {Ok(_) => { if VERBOSE_STACK { println!("send_transaction::send_transaction() : Transaction request sent...") }; },
-        Err(e) => { eprintln!("Account creation failed: {}", e); return; }, };       
-}   
-
-/**
+ /**
  * @notice send_transcation_request() asynchonously packages a transaction request and sends it to the network.
  * @dev The sender's private key is split into two parts, each multiplied by the generator point of the curve25519
  *      elliptic curve. The points are base64 encoded and sent to the network along w/ other transaction details.
  */
-async fn send_transaction_request(
-    sender_public_key: String, 
-    sender_private_key: String, 
-    recipient_public_key: String, 
-    amount: String
-) -> Result<(), io::Error> {
+pub async fn send_transaction_request(sender_private_key: String, recipient_public_key: String, amount: String ) {
     if VERBOSE_STACK { println!("send_transaction::send_transaction_request() : Sending transaction request...") };
+
+    // derive the public key from the private key
+    let sender_public_key: String = zk_proof::derive_public_key_from_private_key(&sender_private_key);
 
     // Convert the private key to two RistrettoPoints (elliptic curve points)
     let (point1, point2) = zk_proof::private_key_to_curve_points(&sender_private_key);
 
     // Base64 encode the points to send over the network
-    let encoded_point1: String = base64::encode(point1.compress().to_bytes());
-    let encoded_point2: String = base64::encode(point2.compress().to_bytes());
+    let encoded_key_point_1: String = base64::encode(point1.compress().to_bytes());
+    let encoded_key_point_2: String = base64::encode(point2.compress().to_bytes());
 
     // Package the message
-    let message: TransactionRequest = TransactionRequest {
+    let request: TransactionRequest = TransactionRequest {
         action: "transaction".to_string(),
         sender_public_key,
-        sender_obfuscated_private_key_part1: encoded_point1,
-        sender_obfuscated_private_key_part2: encoded_point2,
+        sender_obfuscated_private_key_part1: encoded_key_point_1,
+        sender_obfuscated_private_key_part2: encoded_key_point_2,
         recipient_public_key,
         amount,
     };
+    let request_json: String = serde_json::to_string(&request).unwrap();    
 
-    // Connect and send the message
-    let mut stream: TcpStream = TcpStream::connect(PORT_NUMBER).await?; 
-    let message_json: String = serde_json::to_string(&message)?;
-    stream.write_all(message_json.as_bytes()).await?;  // TODO modify this to send to alll ports
-
-    Ok(())
+    // Load accepted ports configuration
+    let config_data: String = fs::read_to_string("accepted_ports.json").map_err(|e| io::Error::new(io::ErrorKind::Other, e)).unwrap();
+    let config: NetworkConfig = serde_json::from_str(&config_data).map_err(|e| io::Error::new(io::ErrorKind::Other, e)).unwrap();
+  
+    // Send account creation request to all accepted po
+    for node in config.nodes.iter() {
+        let addr = format!("{}:{}", node.address, node.port);
+        if let Ok(mut stream) = TcpStream::connect(&addr).await {
+            let _ = stream.write_all(request_json.as_bytes()).await;
+        }
+    }
 }
 
 

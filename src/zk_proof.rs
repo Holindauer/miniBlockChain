@@ -2,7 +2,7 @@
 use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT; // generator point
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
-use secp256k1::SecretKey;
+use secp256k1::{SecretKey, PublicKey, Secp256k1};
 use sha2::{Digest, Sha256};
 use base64::decode;
 use std::convert::TryInto;
@@ -142,7 +142,27 @@ pub fn verify_points_sum_hash(encoded_point1: &str, encoded_point2: &str, expect
 }
 
 
-// test of obscure_private_key
+
+/**
+ * @notice derive_public_key_from_private_key() accepts a private key as a hex encoded string and returns the public key
+ * derived from the private key as a hex encoded string.
+ */
+pub fn derive_public_key_from_private_key( private_key: &String ) -> String {
+    if VERBOSE_STACK { println!("send_transaction::derive_public_key_from_private_key() : Deriving public key from private key...") };
+
+    // Create a new secp256k1 context
+    let secp = Secp256k1::new();
+ 
+    // Convert the private key to a SecretKey struct and derive the public key from it
+    let secret_key = SecretKey::from_slice(&hex::decode(private_key).unwrap()).unwrap();
+    let public_key = PublicKey::from_secret_key(&secp, &secret_key);
+
+    // Serialize the public key and return it as a hex string
+    hex::encode(public_key.serialize())
+}
+
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

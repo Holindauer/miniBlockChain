@@ -11,6 +11,8 @@ mod block_consensus;
 mod network;
 
 use std::env;
+
+use constants::VERBOSE_STACK;
 /**
  * @notice main.rs runs a blockchain node which connects to a TCP server in order to write to the blockchain. 
  *         There are three options when connecting a node from the CLI: Account Creaction, Trancation, Validation
@@ -70,32 +72,29 @@ use std::env;
 
 
 
-
-fn main() -> std::io::Result<()> {
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    if VERBOSE_STACK  { println!("main.rs: main() called"); }
 
     // read CLI args into vector
     let args: Vec<String> = env::args().collect();
 
-    // Account Creation Specified  
+    // Send Account Creation Request Specified  
     if args[1] == "make" && args.len() == 2{ 
-
-        // send account creation request to validator nodes
-        account_creation::account_creation();
+        account_creation::send_account_creation_request().await;
 
     } // Transaction Specified
     else if args[1] == "transaction" && args.len() == 5{  
 
         // extract provided arguments:
-        let sender_private_key: &String = &args[2];
-        let recipient_public_key: &String = &args[3];
-        let transaction_amount: &String = &args[4];
+        let sender_private_key: String = args[2].to_string();
+        let recipient_public_key: String = args[3].to_string();
+        let transaction_amount: String = args[4].to_string();
 
         // send transaction request to validator nodes
-        send_transaction::send_transaction(
-            sender_private_key, 
-            recipient_public_key, 
-            transaction_amount
-        );
+        send_transaction::send_transaction_request(
+            sender_private_key, recipient_public_key, transaction_amount
+        ).await;
  
     }// Validation Specified 
     else if args[1] == "validate" && args.len() == 3{ 
@@ -104,13 +103,13 @@ fn main() -> std::io::Result<()> {
         let private_key: &String = &args[2];
             
         // Run node as a validator
-        validation::run_validation(private_key);
+        validation::run_validation(private_key).await;
 
     } // Faucet Specified
     else if args[1] == "faucet" && args.len() == 3 {
     
-        let public_key: &String = &args[2]; 
-        faucet::use_faucet(public_key);
+        let public_key: String = args[2].to_string(); 
+        faucet::send_faucet_request(public_key).await;
     }
     else { // Improper Command
         println!("ERROR! Unrecognized Command");

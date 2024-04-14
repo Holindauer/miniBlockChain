@@ -81,21 +81,17 @@ impl ValidatorNode { // initializes datastructures
  * the ValidatorNode struct, sending a request to active peer node for the majority state of the networks and connecting a TCP 
  * listener to the network to start listening for incomring requests.
  */
-pub fn run_validation(private_key: &String) { // TODO implemnt private key/staking idea. Private key to send tokens to
+pub async fn run_validation(private_key: &String) { // TODO implemnt private key/staking idea. Private key to send tokens to
     if VERBOSE_STACK { println!("\nvalidation::run_validation() : Booting up validator node..."); }
 
     // init validator node struct w/ empty blockchain and merkle tree
     let validator_node: ValidatorNode = ValidatorNode::new();
-    let validator_node_clone = validator_node.clone();
 
-    // Establish a new tokio runtime
-    let rt = Runtime::new().unwrap(); 
-
-    // send request to peers to update to network majority blockchain state.  // ! Does this need to be blocked on?
-    rt.block_on(async move { chain_consensus::update_local_blockchain(validator_node_clone).await; }); // TODO modify this to also update the merkle tree at bootup
+    // send request to peers to update to network majority blockchain state.    // TODO focus on this component once new block consensns is implemented
+    // chain_consensus::update_local_blockchain(validator_node.clone()).await;  // TODO modify this to also update the merkle tree at bootup
 
     // listen for and process incoming request
-    network::start_listening(validator_node.clone());
+    network::start_listening(validator_node.clone()).await;
 } 
 
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // Account Creation Verification Logic
@@ -108,7 +104,6 @@ pub fn run_validation(private_key: &String) { // TODO implemnt private key/staki
 pub async fn handle_account_creation_request( request: Value, validator_node: ValidatorNode) -> Result<String, String> { 
     if VERBOSE_STACK { println!("validation::handle_account_creation_request() : Handling account creation...") };
 
-    
     // perform independent vallidation and store decision in validator node struct
     verify_account_creation_independently(request.clone(), validator_node.clone()).await;
 
