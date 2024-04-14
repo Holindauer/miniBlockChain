@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::collections::HashMap;
 
 
-use crate::constants::VERBOSE_STACK;
 use crate::validation;
 use crate::network;
 
@@ -67,7 +66,7 @@ struct BlockConsensusResponse {
  * responses recieved from other validator nodes. Pre collected responces from the peer_consensus_decisions arc mutex hash map.
  */
 pub async fn determine_majority(request: Value, validator_node: validation::ValidatorNode) -> bool {
-    if VERBOSE_STACK { println!("block_consensus::determine_majority() : Determining majority decision..."); }
+    println!("consensus::determine_majority() : Determining majority decision by peers..."); 
 
     // get block decision from validator node
     let peer_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>> = validator_node.peer_decisions.clone();
@@ -111,7 +110,7 @@ pub async fn determine_majority(request: Value, validator_node: validation::Vali
  * The funnction is called within the validator module.
  */
 pub async fn handle_block_consensus_request(request: Value, validator_node: validation::ValidatorNode) -> Result<(), std::io::Error> {
-    if VERBOSE_STACK { println!("block_consensus::handle_block_consensus_request() : Handling block consensus request..."); }
+    println!("block_consensus::handle_block_consensus_request() : Handling block consensus request..."); 
 
     // extract the port number and client block decisions from the validator node
     let self_port: String = validator_node.client_port_address.clone();
@@ -136,6 +135,8 @@ pub async fn handle_block_consensus_request(request: Value, validator_node: vali
  * handle_block_consensus_request() function.
  */
 async fn respond_to_block_consensus_request( client_request_hash: Vec<u8>, client_decision: bool, self_port: String ){
+    println!("block_consensus::respond_to_block_consensus_request() : Responding to block consensus request...");
+
     // Package responce in struct and serialize to JSON
     let consensus_responce = BlockConsensusResponse {
         action: "block_consensus".to_string(),
@@ -155,7 +156,7 @@ async fn respond_to_block_consensus_request( client_request_hash: Vec<u8>, clien
 
     // Connect to port and send msg to validator nodes
     for port in outbound_ports.iter() {
-        if VERBOSE_STACK { println!("respond_to_block_consensus_request() : Sending block consensus request to: {}", port); } 
+        println!("respond_to_block_consensus_request() : Sending block consensus request to: {}", port); 
 
         // Only Send Messages to other ports
         if port != &self_port {
@@ -166,13 +167,12 @@ async fn respond_to_block_consensus_request( client_request_hash: Vec<u8>, clien
                 // Send message to port if connection is successful
                 Ok(mut stream) => {
                     if let Err(e) = stream.write_all(json_msg.as_bytes()).await { eprintln!("Failed to send message to {}: {}", port, e); }
-                    if VERBOSE_STACK { println!("respond_to_block_consensus_request() : Sending block consensus request to: {}", port); } 
+                    println!("respond_to_block_consensus_request() : Sending block consensus request to: {}", port); 
                 },
 
                 // Print error message if connection fails
                 Err(_) => { println!("block_consensus::respond_to_block_consensus_request() : Failed to connect to {}, There may not be a listener...", port); }
             }
         }
-    }   
-}
-
+    }
+}   

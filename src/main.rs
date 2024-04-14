@@ -10,7 +10,6 @@ mod requests;
 
 use std::env;
 
-use constants::VERBOSE_STACK;
 /**
  * @notice main.rs runs a blockchain node which connects to a TCP server in order to write to the blockchain. 
  *         There are three options when connecting a node from the CLI: Account Creaction, Trancation, Validation
@@ -72,17 +71,17 @@ use constants::VERBOSE_STACK;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    if VERBOSE_STACK  { println!("main.rs: main() called"); }
+    println!("main.rs : Parsing CLI Args...");
 
     // read CLI args into vector
     let args: Vec<String> = env::args().collect();
 
     // Send Account Creation Request Specified  
-    if args[1] == "make" && args.len() == 2{ 
+    if args[1] == "make" { 
         requests::send_account_creation_request().await;
 
-    } // Transaction Specified
-    else if args[1] == "transaction" && args.len() == 5{  
+    } // Transaction Request Specified
+    else if args[1] == "transaction" {  
 
         // extract provided arguments:
         let sender_private_key: String = args[2].to_string();
@@ -94,18 +93,13 @@ async fn main() -> std::io::Result<()> {
             sender_private_key, recipient_public_key, transaction_amount
         ).await;
  
-    }// Validation Specified 
-    else if args[1] == "validate" && args.len() == 3{ 
-
-        // extract provided arguments:
+    }// Run Validation Node Specified 
+    else if args[1] == "validate" { 
         let private_key: &String = &args[2];
-            
-        // Run node as a validator
         validation::run_validation(private_key).await;
 
-    } // Faucet Specified
-    else if args[1] == "faucet" && args.len() == 3 {
-    
+    } // Faucet Request Specified
+    else if args[1] == "faucet"  {
         let public_key: String = args[2].to_string(); 
         requests::send_faucet_request(public_key).await;
     }

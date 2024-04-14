@@ -6,10 +6,6 @@ use serde::{Serialize, Deserialize};
 use tokio::sync::{Mutex, MutexGuard};
 use std::sync::Arc;
 
-use crate::constants::VERBOSE_STACK;
-
-
-
 /**
  * @notice blockchain.rs contains the structs and methods for creating and manipulating blocks in the blockchain.
  * There are three types of blocks in the blockchain: Genesis, Transaction, and Account Creation.
@@ -109,7 +105,7 @@ impl BlockChain {
 
     // Initialize a new blockchain with a genesis block
     pub fn new() -> Self {
-        if VERBOSE_STACK { println!("Creating new blockchain..."); }
+        println!("Creating new BlockChain struct..."); 
 
         // Create a new blockchain 
         let mut blockchain: BlockChain = BlockChain {

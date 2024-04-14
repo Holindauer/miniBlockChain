@@ -1,5 +1,4 @@
 use tokio::sync::{Mutex, MutexGuard};
-use tokio::runtime::Runtime;
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
@@ -8,8 +7,7 @@ use std::collections::HashMap;
 use crate::blockchain;
 use crate::blockchain::{BlockChain, Request};
 use crate::merkle_tree::{MerkleTree, Account};
-use crate::constants::{VERBOSE_STACK, FAUCET_AMOUNT};
-use crate::chain_consensus;
+use crate::constants::FAUCET_AMOUNT;
 use crate::consensus;
 use crate::zk_proof;
 use crate::network;
@@ -83,7 +81,7 @@ impl ValidatorNode { // initializes datastructures
  * listener to the network to start listening for incomring requests.
  */
 pub async fn run_validation(private_key: &String) { // TODO implemnt private key/staking idea. Private key to send tokens to
-    if VERBOSE_STACK { println!("\nvalidation::run_validation() : Booting up validator node..."); }
+    println!("\nvalidation::run_validation() : Booting up validator node..."); 
 
     // init validator node struct w/ empty blockchain and merkle tree
     let validator_node: ValidatorNode = ValidatorNode::new();
@@ -103,7 +101,7 @@ pub async fn run_validation(private_key: &String) { // TODO implemnt private key
  * a request to the network for consensus, and adding the account to the ledger if the network reaches a consensus that the request is valid. 
  */
 pub async fn handle_account_creation_request( request: Value, validator_node: ValidatorNode) -> Result<String, String> { 
-    if VERBOSE_STACK { println!("validation::handle_account_creation_request() : Handling account creation...") };
+    println!("validation::handle_account_creation_request()...");
 
     // perform independent vallidation and store decision in validator node struct
     verify_account_creation_independently(request.clone(), validator_node.clone()).await;
@@ -135,6 +133,7 @@ pub async fn handle_account_creation_request( request: Value, validator_node: Va
  * client block decisions hashmap with the decision to accept the request.
  */
 async fn verify_account_creation_independently( request: Value, validator_node: ValidatorNode) {
+    println!("validation::verify_account_creation_independently()...");
 
     // get public key from request
     let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
@@ -164,6 +163,7 @@ async fn verify_account_creation_independently( request: Value, validator_node: 
  * has been verified.
  */
 async fn add_account_creation_to_ledger( request: Value, validator_node: ValidatorNode ) {
+    println!("validation::add_account_creation_to_ledger()...");
 
     // Retrieve public key and obfuscated private key hash from request
     let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
@@ -205,7 +205,7 @@ async fn add_account_creation_to_ledger( request: Value, validator_node: Validat
  * merkle tree, and store the request in the blockchain.
  */
 pub async fn handle_transaction_request(request: Value, validator_node: ValidatorNode) -> Result<bool, String> { // TODO Simplify/decompose this function
-    if VERBOSE_STACK { println!("validation::verify_transaction() : Transaction verification master function...") };
+    println!("validation::handle_transaction_request() : Handling transaction request..."); 
 
     // verify the transaction independently // TODO modify this to adjust the client decision map instead of returning an Option
     if verify_transaction_independently(request.clone(), validator_node.clone()).await != true {return Ok(false); }
@@ -227,6 +227,7 @@ pub async fn handle_transaction_request(request: Value, validator_node: Validato
  * transaction.
  */
 async fn verify_transaction_independently(request: Value, validator_node: ValidatorNode) -> bool {
+    println!("validation::verify_transaction_independently()...");
 
     // retrieve sender and recipient addresses from request
     let sender_address: Vec<u8> = request["sender_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
@@ -264,6 +265,7 @@ async fn verify_transaction_independently(request: Value, validator_node: Valida
  * entire network to both the merkle tree and the blockchain. 
 */
 async fn add_transaction_to_ledger(request: Value, validator_node: ValidatorNode) {
+    println!("validation::add_transaction_to_ledger()...");
 
     // get the sender and recipient addresses from the request
     let sender_address: Vec<u8> = request["sender_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
@@ -315,7 +317,7 @@ async fn add_transaction_to_ledger(request: Value, validator_node: ValidatorNode
  * handle_incoming_message() when a new faucet request is received.
  */
 pub async fn handle_faucet_request(request: Value, validator_node: ValidatorNode) -> Result<(), String> {
-    if VERBOSE_STACK { println!("validation::verify_faucet_request() : Verifying faucet request...") };
+    println!("validation::verify_faucet_request()...");
 
     // verify the faucet request independently
     if verify_faucet_request_independently(request.clone(), validator_node.clone()).await != true { 
@@ -336,6 +338,7 @@ pub async fn handle_faucet_request(request: Value, validator_node: ValidatorNode
  * validator nodes to determine a majority decision that will be accepted by the network regardless of the individual validator node's decision.
  */
 async fn verify_faucet_request_independently(request: Value, validator_node: ValidatorNode) -> bool {
+    println!("validation::verify_faucet_request_independently()...");
 
     // Lock the merkle tree while accessing sender account info
     let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
@@ -355,7 +358,7 @@ async fn verify_faucet_request_independently(request: Value, validator_node: Val
  * verified by the entire network. This function is called by handle_faucet_request() after the faucet request has been verified.
  */
 async fn add_faucet_request_to_ledger(request: Value, validator_node: ValidatorNode) {
-
+    println!("validation::add_faucet_request_to_ledger()...");
 
     // Lock the merkle tree for writing
     let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();

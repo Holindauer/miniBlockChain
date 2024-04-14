@@ -10,8 +10,6 @@ use std::io;
 use rand::rngs::OsRng; // cryptographically secure RNG
 use rand::{thread_rng, RngCore}; // Ensure thread_rng is imported here
 
-use crate::constants::VERBOSE_STACK;  
-
 /**
  * @notice zk_proof.rs contains the logic for generating a simple zero-knowledge proof for verification of knowledge of 
  * the private key of an account for transaction requests. 
@@ -37,7 +35,7 @@ use crate::constants::VERBOSE_STACK;
  * @dev this function is called within account_creation.rs to generate the obfuscated private key that will be stored in the merkle tree.
 */
 pub fn obfuscate_private_key(secret_key: SecretKey) -> RistrettoPoint {
-    if VERBOSE_STACK { println!("zk_proof::obfuscate_private_key() : Obfuscating Private Key..."); }
+    println!("zk_proof::obfuscate_private_key() : Converting private key to single elliptic curve point..."); 
 
     // Convert the secret key to a hex encoded string 
     let secret_key_hex_str: String = secret_key.to_string();
@@ -63,7 +61,7 @@ pub fn obfuscate_private_key(secret_key: SecretKey) -> RistrettoPoint {
  * knowledge of the private key.
 */
 pub fn private_key_to_curve_points(private_key: &String) -> (RistrettoPoint, RistrettoPoint) {
-    if VERBOSE_STACK { println!("zk_proof::private_key_to_curve_points() : Converting Private Key to Curve Points..."); }
+    println!("zk_proof::private_key_to_curve_points() : Converting private key to the sum of two curve points..."); 
 
     // Convert the private key to a scalar
     let private_key_bytes: Vec<u8> = hex::decode(private_key).expect("Decoding failed");
@@ -91,7 +89,7 @@ pub fn private_key_to_curve_points(private_key: &String) -> (RistrettoPoint, Ris
  * @notice hash_obscured_private_key() accepts a RistrattoPoint and returns the hash of the point using sha256
 */
 pub fn hash_obfuscated_private_key(obscured_private_key: RistrettoPoint) -> Vec<u8> {
-    if VERBOSE_STACK { println!("zk_proof::hash_obfuscated_private_key() : Hashing Obfuscated Private Key..."); }
+    println!("zk_proof::hash_obfuscated_private_key() : Hashing curve point representation of private key..."); 
 
     let obscured_private_key_bytes: [u8; 32] = obscured_private_key.compress().to_bytes();
     Sha256::digest(&obscured_private_key_bytes).to_vec()
@@ -102,7 +100,7 @@ pub fn hash_obfuscated_private_key(obscured_private_key: RistrettoPoint) -> Vec<
  * @notice decompress_curve_points() accepts two Base64 encoded points and returns the decompressed Ristretto points
  */
 fn decompress_curve_points( encoded_point1: &str, encoded_point2: &str,) -> Result<(RistrettoPoint, RistrettoPoint), &'static str> {
-    if VERBOSE_STACK { println!("zk_proof::decompress_curve_points() : Decompressing Curve Points..."); }
+    println!("zk_proof::decompress_curve_points() : Decompressing Base64 encoded curve points to Ristretto..."); 
 
     // convert encoded points (str) to bytes
     let point1_bytes: Vec<u8> = decode(encoded_point1).map_err(|_| "Failed to decode point 1 from Base64")?;
@@ -126,7 +124,7 @@ fn decompress_curve_points( encoded_point1: &str, encoded_point2: &str,) -> Resu
  * If they do not match, the function returns false.
  */
 pub fn verify_points_sum_hash(encoded_point1: &str, encoded_point2: &str, expected_hash: Vec<u8>) -> bool {
-    if VERBOSE_STACK { println!("zk_proof::verify_points_sum_hash() : Verifying Points Sum Hash..."); }
+    println!("zk_proof::verify_points_sum_hash() : Verifying hash of curve point sum adds to private key obfuscated curve point hash..."); 
 
     // convert encoded points (str) to Ristretto points
     let (point1, point2) = decompress_curve_points(encoded_point1, encoded_point2).unwrap();
@@ -148,7 +146,7 @@ pub fn verify_points_sum_hash(encoded_point1: &str, encoded_point2: &str, expect
  * @return a tuple of the secret and public key generated for the new account.
  */
 pub fn generate_keypair() -> Result<(SecretKey, PublicKey), io::Error> {
-    if VERBOSE_STACK { println!("account_creation::generate_keypair() : Generating new keypair...") };
+    println!("zk_proof::generate_keypair() : Generating new publlic and private keypair...");
 
     // Create a new secp256k1 context
     let secp = Secp256k1::new();
@@ -176,7 +174,7 @@ pub fn generate_keypair() -> Result<(SecretKey, PublicKey), io::Error> {
  * derived from the private key as a hex encoded string.
  */
 pub fn derive_public_key_from_private_key( private_key: &String ) -> String {
-    if VERBOSE_STACK { println!("send_transaction::derive_public_key_from_private_key() : Deriving public key from private key...") };
+    println!("zk_proof::derive_public_key_from_private_key()...");
 
     // Create a new secp256k1 context
     let secp = Secp256k1::new();

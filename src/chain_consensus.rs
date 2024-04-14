@@ -10,7 +10,7 @@ use tokio::time;
 use serde_json;
 
 use crate::blockchain::BlockChain;
-use crate::constants::{DURATION_GET_PEER_CHAINS, PORT_NUMBER, VERBOSE_STACK};
+use crate::constants::DURATION_GET_PEER_CHAINS;
 use crate::validation;
 
 
@@ -27,7 +27,7 @@ use crate::validation;
  * when booting up a new validator node.
 */
 pub async fn update_local_blockchain(validator_node: validation::ValidatorNode) {
-    if VERBOSE_STACK { println!("validation::update_local_blockchain() : Accepting blockchain records from peers for {} seconds...", DURATION_GET_PEER_CHAINS.as_secs()); }  // TODO eventually move the blockchain update funcs into a seperate file. validation.rs is getting too big
+    println!("validation::update_local_blockchain() : Accepting blockchain records from peers for {} seconds...", DURATION_GET_PEER_CHAINS.as_secs());   // TODO eventually move the blockchain update funcs into a seperate file. validation.rs is getting too big
  
     let local_chain = validator_node.blockchain.clone();
 
@@ -45,7 +45,7 @@ pub async fn update_local_blockchain(validator_node: validation::ValidatorNode) 
                  let mut local_blockchain_guard = local_chain.lock().await;
                  *local_blockchain_guard = majority_chain;
  
-                if VERBOSE_STACK { println!("Blockchain updated to majority state of peer validator nodes."); }
+                println!("Blockchain updated to majority state of peer validator nodes."); 
              }
          },
          Err(e) => println!("Error collecting blockchain records: {}", e),
@@ -58,13 +58,15 @@ pub async fn update_local_blockchain(validator_node: validation::ValidatorNode) 
   * is not intended to be called directly.
   */
  async fn collect_blockchain_records(duration: Duration) -> Result<Vec<BlockChain>, Box<dyn Error>> { // ! TODO Does this ever request the blockchain from the peers? 
-    if VERBOSE_STACK { println!("validation::collect_blockchain_records() : Collecting blockchain records from peers..."); }
+    println!("validation::collect_blockchain_records() : Collecting blockchain records from peers..."); 
  
      // MPSC (multi-producer, single-consumer) channel to collect blockchain records between tasks
      let (tx, mut rx) = mpsc::channel(32); 
  
+    let PORT_NUMBER = "8080";    // ! <<==== temporary placeholder, change to respond only to active nodes tracked via heartbeat signals
+
      // Create a new listener on the specified port
-     let listener = TcpListener::bind(PORT_NUMBER).await?;
+     let listener = TcpListener::bind(PORT_NUMBER).await?; // doto change to port number
      let end_time = time::Instant::now() + duration; // end time for listening
  
      // Spawn a new task to listen for incoming connections
@@ -98,9 +100,9 @@ pub async fn update_local_blockchain(validator_node: validation::ValidatorNode) 
 
     // print that none were collected if none were collected
     if rx.recv().await.is_none() {
-        if VERBOSE_STACK { println!("validation::collect_blockchain_records() : No blockchain records collected from peers..."); }
+        println!("validation::collect_blockchain_records() : No blockchain records collected from peers..."); 
     }else{
-        if VERBOSE_STACK { println!("validation::collect_blockchain_records() : Blockchain records collected from peers..."); }   
+        println!("validation::collect_blockchain_records() : Blockchain records collected from peers..."); 
     }
  
      // Collect records from the channel
@@ -119,7 +121,7 @@ pub async fn update_local_blockchain(validator_node: validation::ValidatorNode) 
   * to the majority state within update_local_blockchain().
   */
  fn determine_majority_blockchain(blockchains: Vec<BlockChain>) -> Option<BlockChain> {
-    if VERBOSE_STACK { println!("validation::determine_majority_blockchain() : Determining majority blockchain..."); }
+    println!("validation::determine_majority_blockchain() : Determining majority blockchain..."); 
  
      // HashMap to store the hash votes
      let mut hash_votes: HashMap<Vec<u8>, i32> = HashMap::new();

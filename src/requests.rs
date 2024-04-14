@@ -8,7 +8,7 @@ use std::{io, fs};
 extern crate secp256k1;
 use secp256k1::{SecretKey, PublicKey};
 extern crate rand;
-use crate::constants::{INTEGRATION_TEST, VERBOSE_STACK};
+use crate::constants::INTEGRATION_TEST;
 extern crate hex;
 use base64;
 
@@ -66,7 +66,7 @@ struct NewAccountDetailsTestOutput {
  * obfuscated private key hash, and sends the account creation request to the network as a json object.
  */
 pub async fn send_account_creation_request(){
-    if VERBOSE_STACK { println!("account_creation::send_account_creation_request() : Sending account creation request...") };
+    println!("request::send_account_creation_request()...");
 
     // Generate a new keypair
     let (secret_key, public_key) = zk_proof::generate_keypair().unwrap();
@@ -88,7 +88,7 @@ pub async fn send_account_creation_request(){
     send_json_request(request_json).await;
 
     // print hunman readable account details
-    if VERBOSE_STACK { print_human_readable_account_details(&secret_key, &public_key); }
+    print_human_readable_account_details(&secret_key, &public_key);
     if INTEGRATION_TEST { save_new_account_details_json(&secret_key.to_string(), &public_key.to_string()); }
 }
 
@@ -99,7 +99,7 @@ pub async fn send_account_creation_request(){
  *      elliptic curve. The points are base64 encoded and sent to the network along w/ other transaction details.
  */
 pub async fn send_transaction_request(sender_private_key: String, recipient_public_key: String, amount: String ) {
-    if VERBOSE_STACK { println!("send_transaction::send_transaction_request() : Sending transaction request...") };
+    println!("requests::send_transaction_request()...");
 
     // derive the public key from the private key
     let sender_public_key: String = zk_proof::derive_public_key_from_private_key(&sender_private_key);
@@ -129,7 +129,7 @@ pub async fn send_transaction_request(sender_private_key: String, recipient_publ
  * @notice send_faucet_request() sends a request to the network to provide a given public key with a small amount of tokens
  */
 pub async fn send_faucet_request(public_key: String)  {
-    if VERBOSE_STACK { println!("faucet::send_faucet_request() : Sending faucet request..."); }
+    println!("request::send_faucet_request()...");
 
     // Package the message for network transmission
     let request = NetworkRequest::Faucet { public_key: public_key.to_string(), };
@@ -147,7 +147,7 @@ pub async fn send_faucet_request(public_key: String)  {
  * the majority decision of the network.
 */
 pub async fn send_consensus_request( request: Value, validator_node: ValidatorNode )  {
-    if VERBOSE_STACK { println!("block_consensus::send_block_consensus_request() : Preparing block consensus request..."); }
+    println!("requests::send_block_consensus_request()...");
 
     // extract the port number form the validator node
     let self_port: String = validator_node.client_port_address.clone();
@@ -175,7 +175,7 @@ pub async fn send_consensus_request( request: Value, validator_node: ValidatorNo
  * active and responces should be expected from the port_address in the HeartBeat msg folllowing a consensus request. 
  */
 pub async fn send_heartbeat_request(validator_node: ValidatorNode) {
-    if VERBOSE_STACK { println!("network::send_heartbeat() : Sending heartbeat signals to the network..."); }
+    println!("requests::send_heartbeat()...");
 
     // get client port and outbound ports
     let client_port: String = validator_node.client_port_address.clone();
@@ -194,6 +194,7 @@ pub async fn send_heartbeat_request(validator_node: ValidatorNode) {
  * @notice send_json_request() sends a json request to the network
  */
 async fn send_json_request(request_json: String) {
+    println!("requests::send_json_request() : sending serialized request to network...");
 
     // Load accepted ports configuration
     let config_data: String = fs::read_to_string("accepted_ports.json").map_err(|e| io::Error::new(io::ErrorKind::Other, e)).unwrap();

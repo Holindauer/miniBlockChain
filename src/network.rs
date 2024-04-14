@@ -3,12 +3,10 @@ use std::fs;
 use std::sync::Arc;
 
 use tokio::net::TcpListener;
-use tokio::time::{self, Duration};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 use tokio::io::Error as TokioIoError; 
-use tokio::sync::{Mutex, MutexGuard};
-use tokio::net::TcpStream;
-use tokio::runtime::Runtime;
+use tokio::sync::Mutex;
+use tokio::time;
 
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
@@ -17,7 +15,7 @@ use sha2::{Digest, Sha256};
 
 use crate::validation;
 use crate::validation::ValidatorNode;
-use crate::constants::{VERBOSE_STACK, INTEGRATION_TEST, HEARTBEAT_PERIOD, HEARTBEAT_TIMEOUT};
+use crate::constants::{INTEGRATION_TEST, HEARTBEAT_PERIOD, HEARTBEAT_TIMEOUT};
 use crate::consensus;
 use crate::blockchain::{save_most_recent_block_json, print_chain_human_readable};
 use crate::requests;
@@ -54,7 +52,7 @@ pub struct PortConfig {
  * first available port. If the function is unsuccessful, it will return an IoError.
 */
 pub async fn try_bind_to_ports() -> Result<(TcpListener, String), IoError> {
-    if VERBOSE_STACK { println!("network::try_bind_to_ports() : Attempting to bind to ports specified in accepted_ports.json..."); }
+    println!("network::try_bind_to_ports() : Attempting to bind to ports specified in accepted_ports.json...");
 
     // Load the accepted ports configuration file
     let config_data = match fs::read_to_string("accepted_ports.json") {
@@ -73,7 +71,7 @@ pub async fn try_bind_to_ports() -> Result<(TcpListener, String), IoError> {
 
     // Attempt to bind to each port in the configuration
     for node in &config.nodes {
-        if VERBOSE_STACK { println!("validation::try_bind_to_ports() : Attempting to bind to port {}...", node.port); }
+        println!("validation::try_bind_to_ports() : Attempting to bind to port {}...", node.port); 
 
         // format the address and port into a string
         let port_address: String = format!("{}:{}", node.address, node.port);
@@ -99,7 +97,7 @@ pub async fn start_listening(validator_node: ValidatorNode) {
     // Attempt to bind to one of the ports specified in the accepted_ports.json config file
     let (listener, client_port_address) = match try_bind_to_ports().await {
 
-        Ok(result) => { if VERBOSE_STACK { println!("validation::start_listening() : Listening on `{}...`", result.1); } result },
+        Ok(result) => { println!("validation::start_listening() : Listening on `{}...`", result.1); result },
         Err(e) => { eprintln!("Refused to bind to any configured port: {}", e); return; }
     };       
 
@@ -148,7 +146,7 @@ async fn send_heartbeat_periodically(validator_node: ValidatorNode) {
  * and blockchain. The buffer is parsed and the next step for the request is determined from the msg contents. 
  */
 async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode ) {
-    if VERBOSE_STACK { println!("\nvalidation::handle_incoming_message() : Handling incoming message...") };
+    println!("\nvalidation::handle_incoming_message()...");
 
     // convert the buffer to a string 
     let msg = String::from_utf8_lossy(&buffer[..buffer.len()]);
@@ -165,7 +163,7 @@ async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode )
                 match validation::handle_account_creation_request( request, validator_node.clone() ).await {  
 
                     Ok(public_key) => { // upon succesfull account creation, print blockchain state, save most recent block for integration testing
-                        if VERBOSE_STACK { print_chain_human_readable(validator_node.blockchain.clone()).await;}  
+                        print_chain_human_readable(validator_node.blockchain.clone()).await;
                         if INTEGRATION_TEST { save_most_recent_block_json(validator_node.blockchain.clone()).await; } // TODO move these functions out of the validation module and into the blockchain module
                     },
                     Err(e) => {eprintln!("Account creation Invalid: {}", e);}
@@ -177,11 +175,9 @@ async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode )
                     Ok(success) => {
     
                         // upon succesfull transaction, print blockchain state or indicate transaction refusall
-                        if VERBOSE_STACK {
-                            if success { print_chain_human_readable(validator_node.blockchain.clone()).await;}
-                            else { eprintln!("Transaction failed to verify"); }
-                        }                       
-    
+                        if success { print_chain_human_readable(validator_node.blockchain.clone()).await;}
+                        else { eprintln!("Transaction failed to verify"); }
+
                         // if doing an integration test, save the most recent block as a json file
                         if INTEGRATION_TEST { 
                             save_most_recent_block_json(validator_node.blockchain.clone()).await;
@@ -197,7 +193,7 @@ async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode )
                     Ok(_) => { 
 
                         // upon succesfull faucet request, print blockchain state
-                        if VERBOSE_STACK { print_chain_human_readable(validator_node.blockchain.clone()).await;} 
+                        print_chain_human_readable(validator_node.blockchain.clone()).await;
                         if INTEGRATION_TEST { save_most_recent_block_json(validator_node.blockchain.clone()).await; } // save latest block for integration testing
                     },
                     Err(e) => { eprintln!("Faucet request failed: {}", e); }
@@ -230,6 +226,7 @@ async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode )
  * @notice hash_network_request() uses Sha256 to hash a serde_json::Value that contains that contains network request information
  */
 pub async fn hash_network_request(request_struct_json: Value) -> Vec<u8> {
+    println!("network::hash_network_request()...");
 
     // use SHA256 to hash the request
     let mut hasher = Sha256::new();
@@ -244,6 +241,7 @@ pub async fn hash_network_request(request_struct_json: Value) -> Vec<u8> {
  * ports of the network. All ports that are not the port of the client are collected and returned as a vector of strings.
  */
 pub async fn collect_outbound_ports(self_port: String) -> Result<Vec<String>, TokioIoError> {
+    println!("network::collect_outbound_ports()...");
 
     // Asynchronously load the accepted ports configuration file
     let config_data = tokio::fs::read_to_string("accepted_ports.json").await?;
@@ -265,7 +263,7 @@ pub async fn collect_outbound_ports(self_port: String) -> Result<Vec<String>, To
  * @notice handle_heartbeat_request() is an asynchronous function that handles incoming heartbeat requests from other nodes on the network.
  */
 async fn handle_heartbeat(request: Value, validator_node: ValidatorNode) -> Result<(), String> {
-    if VERBOSE_STACK { println!("network::handle_heartbeat_request() : Handling incoming heartbeat request..."); }
+    println!("network::handle_heartbeat_request()...");
 
     // Extract the port address from the request
     let port_address: String = request["port_address"].as_str()
