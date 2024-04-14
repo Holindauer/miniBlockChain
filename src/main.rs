@@ -1,14 +1,12 @@
-mod account_creation;
 mod blockchain;
-mod send_transaction;
 mod validation;
 mod merkle_tree;
 mod zk_proof;
 mod constants;
-mod faucet;
 mod chain_consensus;
 mod block_consensus;
 mod network;
+mod requests;
 
 use std::env;
 
@@ -81,7 +79,7 @@ async fn main() -> std::io::Result<()> {
 
     // Send Account Creation Request Specified  
     if args[1] == "make" && args.len() == 2{ 
-        account_creation::send_account_creation_request().await;
+        requests::send_account_creation_request().await;
 
     } // Transaction Specified
     else if args[1] == "transaction" && args.len() == 5{  
@@ -92,7 +90,7 @@ async fn main() -> std::io::Result<()> {
         let transaction_amount: String = args[4].to_string();
 
         // send transaction request to validator nodes
-        send_transaction::send_transaction_request(
+        requests::send_transaction_request(
             sender_private_key, recipient_public_key, transaction_amount
         ).await;
  
@@ -109,7 +107,7 @@ async fn main() -> std::io::Result<()> {
     else if args[1] == "faucet" && args.len() == 3 {
     
         let public_key: String = args[2].to_string(); 
-        faucet::send_faucet_request(public_key).await;
+        requests::send_faucet_request(public_key).await;
     }
     else { // Improper Command
         println!("ERROR! Unrecognized Command");

@@ -6,8 +6,9 @@ use secp256k1::{SecretKey, PublicKey, Secp256k1};
 use sha2::{Digest, Sha256};
 use base64::decode;
 use std::convert::TryInto;
+use std::io;
 use rand::rngs::OsRng; // cryptographically secure RNG
-use rand::RngCore;
+use rand::{thread_rng, RngCore}; // Ensure thread_rng is imported here
 
 use crate::constants::VERBOSE_STACK;  
 
@@ -142,6 +143,33 @@ pub fn verify_points_sum_hash(encoded_point1: &str, encoded_point2: &str, expect
 }
 
 
+/**
+ * @notice generate_keypair() uses the sepc256k1 eliptic curve to randomly generate a new private/public keypair.
+ * @return a tuple of the secret and public key generated for the new account.
+ */
+pub fn generate_keypair() -> Result<(SecretKey, PublicKey), io::Error> {
+    if VERBOSE_STACK { println!("account_creation::generate_keypair() : Generating new keypair...") };
+
+    // Create a new secp256k1 context
+    let secp = Secp256k1::new();
+
+    // Generate a new cryptographically random number generator  
+    let mut rng = thread_rng();
+
+    // Generate a new secret key
+    let mut secret_key_bytes = [0u8; 32]; // arr of 32 bytes
+    rng.fill_bytes(&mut secret_key_bytes);    // fill w/ random bytes
+    
+    // encapsulate the secret key bytes into a SecretKey type for safer handling
+    let secret_key: SecretKey = SecretKey::from_slice(&secret_key_bytes)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string())).unwrap(); // map error to io::Error from secp256k1::Error
+
+    // Derive the public key from the secret key
+    let public_key: PublicKey = PublicKey::from_secret_key(&secp, &secret_key);
+
+    Ok((secret_key, public_key))
+}
+
 
 /**
  * @notice derive_public_key_from_private_key() accepts a private key as a hex encoded string and returns the public key
@@ -167,7 +195,6 @@ pub fn derive_public_key_from_private_key( private_key: &String ) -> String {
 mod tests {
     use super::*;
     use curve25519_dalek::scalar::Scalar;
-    use crate::account_creation::generate_keypair;
 
     /**
      * @test test_obfuscate_private_key() verifies that the obfuscate_private_key() function returns a RistrettoPoint that is the
