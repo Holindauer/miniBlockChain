@@ -97,8 +97,6 @@ impl ValidatorNode { // initializes datastructures
 
         // Get the number of true and false responses for the request, handling a None case w/ default values
         let request_decisions: &(u32, u32) = peer_decisions_guard.get(request_hash).unwrap_or(&(0, 0));
-
-
         let (true_count, false_count) = request_decisions;
 
         // get total number of peers
@@ -169,6 +167,9 @@ pub async fn handle_account_creation_request( request: Value, validator_node: Va
 
     // Determine if the client's decision is the majority decision
     let peer_majority_decision: bool = consensus::determine_majority(request.clone(), validator_node.clone()).await;
+
+    // print majority decision
+    println!("validation::handle_account_creation_request() : Majority Decision: {}", peer_majority_decision);
 
     // return error if network consensus not reached
     if (peer_majority_decision == false) { return Err("Network agreed the request was invalid".to_string());}

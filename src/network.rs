@@ -207,7 +207,7 @@ async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode )
             },
             Some("ConsensusResponse") => { // Handle New Block Decision Request
 
-                println!("Block Consensus Request Recieved...");
+                println!("Block Consensus Response Recieved...");
                 consensus::handle_consensus_response( request, validator_node.clone()).await 
             },
             Some("HeartBeat") => { // Handle Heartbeat Request

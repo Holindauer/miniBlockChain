@@ -43,7 +43,7 @@ use crate::validation::ValidatorNode;
      },
      ConsensusRequest{ 
         request_hash: Vec<u8>,
-        resonse_port: String,
+        response_port: String,
     },
     HeartBeat{
         port_address: String,
@@ -158,7 +158,7 @@ pub async fn send_consensus_request( request: Value, validator_node: ValidatorNo
     // Package peer request in struct and serialize to JSON
     let consensus_request = NetworkRequest::ConsensusRequest {
         request_hash: client_request_hash.clone(),
-        resonse_port: self_port.clone()
+        response_port: self_port.clone()
     };
 
     // Serialize request to JSON

@@ -3,7 +3,7 @@ use tokio::io::AsyncWriteExt;
 use serde_json::Value;
 use serde_json; 
 use serde::{Serialize, Deserialize};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use std::sync::Arc;
 use std::collections::HashMap;
 
@@ -60,6 +60,96 @@ struct BlockConsensusResponse {
     decision: bool,
 }
 
+
+/**
+ * @notice handle_block_consensus_request() is an asynchronous function that handles a block consensus request from another validator node.
+ * This function will retrieve the client decision from the request, package the response, and send the response back to the requesting node.
+ * The funnction is called within the validator module.
+ */
+pub async fn handle_consensus_request(request: Value, validator_node: validation::ValidatorNode) {
+    println!("block_consensus::handle_block_consensus_request() : Handling block consensus request..."); 
+
+    // print the request json
+    println!("Request: {}", request);
+
+    // retrieve request hash from request 
+    // retrieve request hash from request as a vector of u8
+    let request_hash: Vec<u8> = request["request_hash"].as_array().unwrap()
+                                     .iter()
+                                     .map(|x| x.as_u64().unwrap() as u8)
+                                     .collect();
+
+    // print the request hash
+    println!("Request Hash: {:?}", request_hash);
+
+    // lock mutex and get client decision from validator node
+    let client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>= validator_node.client_decisions.clone();
+    let client_decisions_guard = client_decisions.lock().await;
+    let client_decision: bool = client_decisions_guard.get(&request_hash).unwrap().clone();   
+
+    // Package responce in struct and serialize to JSON
+    let consensus_responce = BlockConsensusResponse {
+        action: "ConsensusResponse".to_string(), 
+        request_hash, 
+        decision: client_decision
+    };
+    let json_msg: String = serde_json::to_string(&consensus_responce).unwrap();
+
+    // retrieve response port from request
+    let response_port: String = request["response_port"].as_str().unwrap().to_string();
+
+   // Connect to port and send message  
+    match TcpStream::connect(response_port.clone()).await {
+
+        // Send message to port if connection is successful
+        Ok(mut stream) => {
+            if let Err(e) = stream.write_all(json_msg.as_bytes()).await { eprintln!("Failed to send message to {}: {}", response_port, e); }
+            println!("respond_to_block_consensus_request() : Sending block consensus response to: {}", response_port); 
+         },
+
+        // Print error message if connection fails
+        Err(_) => { println!("block_consensus::respond_to_block_consensus_request() : Failed to connect to {}, There may not be a listener...", response_port); }
+    }
+}   
+
+pub async fn handle_consensus_response(request: Value, validator_node: validation::ValidatorNode) {
+    println!("block_consensus::handle_block_consensus_response() : Handling block consensus response..."); 
+
+    // get request hash from request
+    let request_hash: Vec<u8> = request["request_hash"].as_array().unwrap()
+                                     .iter()
+                                     .map(|x| x.as_u64().unwrap() as u8)
+                                     .collect();
+
+    // get client decision from request
+    let decision: bool = request["decision"].as_bool().unwrap();
+
+    // get peer decisions from validator node
+    let peer_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>> = validator_node.peer_decisions.clone();
+    let mut peer_decisions_guard = peer_decisions.lock().await;
+
+    // get counts from peer decisions
+    let mut true_count: u32 = 0; let mut false_count: u32 = 0;
+    if peer_decisions_guard.contains_key(&request_hash) {
+        true_count = peer_decisions_guard.get(&request_hash).unwrap().0;
+        false_count = peer_decisions_guard.get(&request_hash).unwrap().1;
+    }
+
+    // add client decision to counts
+    if decision { true_count += 1; } else { false_count += 1; }
+
+    // update peer decisions
+    peer_decisions_guard.insert(request_hash.clone(), (true_count, false_count));
+
+    // trigger the notify to wake up the main thread
+    let notify: Arc<Notify> = validator_node.notify.clone();
+    notify.notify_one();
+
+    println!("Peer Votes for True: {} Votes for False: {}", true_count, false_count);
+
+}
+
+
 /**
  * @notice determine_majority() is an asynchronous function that determines the majority decision of the network based on the 
  * responses recieved from other validator nodes. Pre collected responces from the peer_consensus_decisions arc mutex hash map.
@@ -100,78 +190,4 @@ pub async fn determine_majority(request: Value, validator_node: validation::Vali
     if true_count > false_count { true } else { false }
     
 }
-
-
-
-/**
- * @notice handle_block_consensus_request() is an asynchronous function that handles a block consensus request from another validator node.
- * This function will retrieve the client decision from the request, package the response, and send the response back to the requesting node.
- * The funnction is called within the validator module.
- */
-pub async fn handle_consensus_request(request: Value, validator_node: validation::ValidatorNode) {
-    println!("block_consensus::handle_block_consensus_request() : Handling block consensus request..."); 
-
-    // retrieve request hash from request 
-    let request_hash: Vec<u8> = request["request_hash"].as_str().unwrap().as_bytes().to_vec();
-
-    // lock mutex and get client decision from validator node
-    let client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>= validator_node.client_decisions.clone();
-    let client_decisions_guard = client_decisions.lock().await;
-    let client_decision: bool = client_decisions_guard.get(&request_hash).unwrap().clone();   
-
-    // Package responce in struct and serialize to JSON
-    let consensus_responce = BlockConsensusResponse {
-        action: "ConsensusResponse".to_string(), 
-        request_hash, 
-        decision: client_decision
-    };
-    let json_msg: String = serde_json::to_string(&consensus_responce).unwrap();
-
-    // retrieve response port from request
-    let response_port: String = request["response_port"].as_str().unwrap().to_string();
-
-   // Connect to port and send message  
-    match TcpStream::connect(response_port.clone()).await {
-
-        // Send message to port if connection is successful
-        Ok(mut stream) => {
-            if let Err(e) = stream.write_all(json_msg.as_bytes()).await { eprintln!("Failed to send message to {}: {}", response_port, e); }
-            println!("respond_to_block_consensus_request() : Sending block consensus response to: {}", response_port); 
-         },
-
-        // Print error message if connection fails
-        Err(_) => { println!("block_consensus::respond_to_block_consensus_request() : Failed to connect to {}, There may not be a listener...", response_port); }
-    }
-}   
-
-pub async fn handle_consensus_response(request: Value, validator_node: validation::ValidatorNode) {
-    println!("block_consensus::handle_block_consensus_response() : Handling block consensus response..."); 
-
-    // get request hash from request
-    let request_hash: Vec<u8> = request["request_hash"].as_str().unwrap().as_bytes().to_vec();
-
-    // get client decision from request
-    let decision: bool = request["decision"].as_bool().unwrap();
-
-    // get peer decisions from validator node
-    let peer_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>> = validator_node.peer_decisions.clone();
-    let mut peer_decisions_guard = peer_decisions.lock().await;
-
-    // get counts from peer decisions
-    let mut true_count: u32 = 0; let mut false_count: u32 = 0;
-    if peer_decisions_guard.contains_key(&request_hash) {
-        true_count = peer_decisions_guard.get(&request_hash).unwrap().0;
-        false_count = peer_decisions_guard.get(&request_hash).unwrap().1;
-    }
-
-    // add client decision to counts
-    if decision { true_count += 1; } else { false_count += 1; }
-
-    // update peer decisions
-    peer_decisions_guard.insert(request_hash.clone(), (true_count, false_count));
-
-    println!("Votes for True: {} Votes for False: {}", true_count, false_count);
-
-}
-
 
