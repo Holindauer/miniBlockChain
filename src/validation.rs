@@ -190,28 +190,31 @@ pub async fn handle_account_creation_request( request: Value, validator_node: Va
 async fn verify_account_creation_independently( request: Value, validator_node: ValidatorNode) {
     println!("validation::verify_account_creation_independently()...");
 
-    // get public key from request
-    let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
-
-    // clone the merkle tree and client block decisions from the validator node struct
-    let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
-    let client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>> = validator_node.client_decisions.clone();
-
     // init client decision to false
     let decision: bool;
 
-    // Lock the merkle tree while checking that the account doesnt already exist in the tree
-    let merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
-    if merkle_tree_guard.account_exists(public_key.clone()) { decision = false; }else { decision = true;}
+    // get public key from request
+    let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
 
+    // Lock the merkle tree 
+    let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
+    let merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
+
+    // make decision upone whether the account already exist in the tree
+    if merkle_tree_guard.account_exists(public_key.clone()) { decision = false; }else { decision = true; }
     println!("validation::verify_account_creation_independently() : Client decision: {}", decision);
 
     // use SHA256 to hash the request
     let client_request_hash: Vec<u8> = network::hash_network_request(request).await;
 
-    // otherwise lock the client block decisions and update the client decision
+    // lock the client decisions map
+    let client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>> = validator_node.client_decisions.clone();
     let mut client_decisions_guard: MutexGuard<HashMap<Vec<u8>, bool>> = client_decisions.lock().await;
-    client_decisions_guard.insert(client_request_hash.clone(), decision);
+
+    // insert the decision in the client decision map
+    client_decisions_guard.insert(
+        client_request_hash.clone(), decision
+    ); 
 }
 
 /**
@@ -264,10 +267,28 @@ async fn add_account_creation_to_ledger( request: Value, validator_node: Validat
 pub async fn handle_transaction_request(request: Value, validator_node: ValidatorNode) -> Result<bool, String> { // TODO Simplify/decompose this function
     println!("validation::handle_transaction_request() : Handling transaction request..."); 
 
-    // verify the transaction independently // TODO modify this to adjust the client decision map instead of returning an Option
-    if verify_transaction_independently(request.clone(), validator_node.clone()).await != true {return Ok(false); }
+    // verify the transaction independently 
+    verify_transaction_independently(request.clone(), validator_node.clone()).await;
 
-    // TODO implement network consensus here
+    // Prepare for responses (updating the count of active peers)
+    validator_node.prepare_for_responses().await;
+
+    // send for network consensus on the request
+    requests::send_consensus_request( request.clone(), validator_node.clone() ).await;
+
+    // await responses from all peers (checks that num peers matches num responses)
+    validator_node.await_responses(
+        &network::hash_network_request(request.clone()).await
+    ).await;
+
+    // Determine if the client's decision is the majority decision
+    let peer_majority_decision: bool = consensus::determine_majority(request.clone(), validator_node.clone()).await;
+
+    // print majority decision
+    println!("validation::handle_transaction_request() : Majority Decision: {}", peer_majority_decision);
+
+    // return error if network consensus not reached
+    if (peer_majority_decision == false) { return Err("Network agreed the request was invalid".to_string());}
 
     // add the transaction to the ledger
     add_transaction_to_ledger(request.clone(), validator_node.clone()).await;
@@ -283,9 +304,10 @@ pub async fn handle_transaction_request(request: Value, validator_node: Validato
  * the sender and recipient accounts both exist in the merkle tree, and that the sender has sufficient balance to send the
  * transaction.
  */
-async fn verify_transaction_independently(request: Value, validator_node: ValidatorNode) -> bool {
+async fn verify_transaction_independently(request: Value, validator_node: ValidatorNode) {
     println!("validation::verify_transaction_independently()...");
 
+  
     // retrieve sender and recipient addresses from request
     let sender_address: Vec<u8> = request["sender_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
     let recipient_address: Vec<u8> = request["recipient_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
@@ -302,18 +324,34 @@ async fn verify_transaction_independently(request: Value, validator_node: Valida
     let merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
 
     // Check that the both accounts already exist
-    if merkle_tree_guard.account_exists(sender_address.clone()) != true { return false; }
-    if merkle_tree_guard.account_exists(recipient_address.clone()) != true { return false; }
+    let sender_exists: bool = merkle_tree_guard.account_exists(sender_address.clone());
+    let recipient_exists: bool = merkle_tree_guard.account_exists(recipient_address.clone());
 
     // Verify the sender's private key using the zk_proof module 
     let sender_private_key_hash: Vec<u8> = merkle_tree_guard.get_private_key_hash(sender_address.clone()).unwrap();
-    if zk_proof::verify_points_sum_hash(&curve_point_1, &curve_point_2, sender_private_key_hash) != true {  return false; }
+    let knoweldge_of_private_key: bool = zk_proof::verify_points_sum_hash(&curve_point_1, &curve_point_2, sender_private_key_hash);
         
     // get sender and recipient balances    
     let sender_balance: u64 = merkle_tree_guard.get_account_balance(sender_address.clone()).unwrap();
-    if sender_balance < transaction_amount { return false; }
+    let sufficient_funds: bool = sender_balance >= transaction_amount;
 
-    true // return true if all checks pass
+    // lock client decisions map
+    let client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>> = validator_node.client_decisions.clone();
+    let mut client_decisions_guard: MutexGuard<HashMap<Vec<u8>, bool>> = client_decisions.lock().await;
+
+    // make decision based on the checks
+    let decision: bool;
+    if sender_exists && recipient_exists && knoweldge_of_private_key && sufficient_funds {
+        decision = true;
+    } else {
+        decision = false;
+    }
+
+    // insert the decision in the client decision map
+    client_decisions_guard.insert(
+        network::hash_network_request(request.clone()).await, decision
+    );
+
 } // TODO issue #7 to be implemented here
 
 
