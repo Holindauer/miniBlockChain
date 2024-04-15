@@ -108,6 +108,13 @@ impl ValidatorNode { // initializes datastructures
 
     // Awaits until all responses have been received
     pub async fn await_responses(&self, request_hash: &Vec<u8>) {
+
+        // retrieve actove peers
+        let active_peers_guard = self.active_peers.lock().await;
+        let total_peers = active_peers_guard.len();
+
+        // if there are no active peers, return 
+        if total_peers == 0 { return; }
         
         while !self.check_all_responses_received(request_hash).await {
 
