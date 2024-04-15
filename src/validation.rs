@@ -1,4 +1,4 @@
-use tokio::sync::{Mutex, MutexGuard};
+use tokio::sync::{Mutex, MutexGuard, Notify};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use crate::blockchain;
 use crate::blockchain::{BlockChain, Request};
 use crate::merkle_tree::{MerkleTree, Account};
-use crate::constants::FAUCET_AMOUNT;
+use crate::constants::{FAUCET_AMOUNT, HEARTBEAT_TIMEOUT};
 use crate::consensus;
 use crate::zk_proof;
 use crate::network;
@@ -54,12 +54,18 @@ use crate::requests;
  */
 #[derive(Clone)]
 pub struct ValidatorNode {
+
+    // Local Ledger State
     pub blockchain: Arc<Mutex<BlockChain>>,
     pub merkle_tree: Arc<Mutex<MerkleTree>>,
+
+    // Datastructures for Validation
     pub peer_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>>, 
     pub client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>,
     pub client_port_address: String,    
     pub active_peers: Arc<Mutex<Vec<(String, u64)>>>, 
+    pub total_peers: Arc<Mutex<usize>>, // Track the number of active peers expected to respond
+    pub notify: Arc<Notify>, // Notify the validator node when all responses have been recieved
 }
 
 impl ValidatorNode { // initializes datastructures
@@ -71,7 +77,51 @@ impl ValidatorNode { // initializes datastructures
             client_decisions: Arc::new(Mutex::new(HashMap::new())),
             client_port_address: String::new(),
             active_peers: Arc::new(Mutex::new(Vec::new())),
+            total_peers: Arc::new(Mutex::new(0)), // Initialize with zero, will be set when peers are known
+            notify: Arc::new(Notify::new()),
         }
+    }
+
+    // Updates the number of active peers in preparation to wait for their responses
+    pub async fn prepare_for_responses(&self) {
+        let active_peers = self.active_peers.lock().await;
+        let mut total_peers = self.total_peers.lock().await;
+        *total_peers = active_peers.len();
+    }
+
+    // Checks if all responses have been received for a particular request
+    pub async fn check_all_responses_received(&self, request_hash: &Vec<u8>) -> bool {
+
+        // Retrive the number of responses for the request
+        let peer_decisions_guard = self.peer_decisions.lock().await;
+
+        // Get the number of true and false responses for the request, handling a None case w/ default values
+        let request_decisions: &(u32, u32) = peer_decisions_guard.get(request_hash).unwrap_or(&(0, 0));
+
+
+        let (true_count, false_count) = request_decisions;
+
+        // get total number of peers
+        let total_peers: u32 = *self.total_peers.lock().await as u32;
+
+        // return true if all expectec responses have been recieved
+        true_count + false_count == total_peers
+    }
+
+    // Awaits until all responses have been received
+    pub async fn await_responses(&self, request_hash: &Vec<u8>) {
+        
+        while !self.check_all_responses_received(request_hash).await {
+
+            // notify the validator node that all responses have been recieved
+            self.notify.notified().await;
+        }
+
+        // Once we break out of the loop, it means all responses are in
+        let peer_decisions_guard = self.peer_decisions.lock().await;
+        let request_decisions: &(u32, u32) = peer_decisions_guard.get(request_hash).unwrap();
+        let (true_count, false_count) = request_decisions;
+        println!("Received all responses for request: {} yays, {} nays", true_count, false_count);
     }
 }
 
@@ -106,12 +156,16 @@ pub async fn handle_account_creation_request( request: Value, validator_node: Va
     // perform independent vallidation and store decision in validator node struct
     verify_account_creation_independently(request.clone(), validator_node.clone()).await;
 
+    // Prepare for responses (updating the count of active peers)
+    validator_node.prepare_for_responses().await;
+
     // send for network consensus on the request
     requests::send_consensus_request( request.clone(), validator_node.clone() ).await;
 
-    // TODO MAKE SURE BLOCK CONSENSUS RESPONCE IS ACTUALLY BEING SENT 
-
-    // TODO Heartbeat mechanism (to be implemented) should be checked here for who a response is expected from
+    // await responses from all peers (checks that num peers matches num responses)
+    validator_node.await_responses(
+        &network::hash_network_request(request.clone()).await
+    ).await;
 
     // Determine if the client's decision is the majority decision
     let peer_majority_decision: bool = consensus::determine_majority(request.clone(), validator_node.clone()).await;
@@ -148,6 +202,8 @@ async fn verify_account_creation_independently( request: Value, validator_node: 
     // Lock the merkle tree while checking that the account doesnt already exist in the tree
     let merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
     if merkle_tree_guard.account_exists(public_key.clone()) { decision = false; }else { decision = true;}
+
+    println!("validation::verify_account_creation_independently() : Client decision: {}", decision);
 
     // use SHA256 to hash the request
     let client_request_hash: Vec<u8> = network::hash_network_request(request).await;
@@ -389,9 +445,51 @@ async fn add_faucet_request_to_ledger(request: Value, validator_node: ValidatorN
 
 
 
+// ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // Heartbeat Update Logic
+
+/**
+ * @notice handle_heartbeat_request() is an asynchronous function that handles incoming heartbeat requests from other nodes on the network.
+ */
+pub async fn handle_heartbeat(request: Value, validator_node: ValidatorNode) -> Result<(), String> {
+    println!("network::handle_heartbeat_request()...");
+
+    // Extract the port address from the request
+    let port_address: String = request["port_address"].as_str()
+        .ok_or_else(|| "Failed to extract port address from heartbeat request".to_string())?
+        .to_string();
+
+    // Retrieve and lock the active_peers vector
+    let active_peers: Arc<Mutex<Vec<(String, u64)>>> = validator_node.active_peers.clone();
+    let mut active_peers_guard = active_peers.lock().await;
+
+    // Get the current time
+    let current_time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "Failed to get current time".to_string())?
+        .as_secs();
+
+    // add the peer to the active peers list if it is not already present
+    if !active_peers_guard.iter().any(|peer| peer.0 == port_address) {
+        active_peers_guard.push((port_address.clone(), current_time));        
+    }else{
+        // update the timestamp of the peer
+        for peer in active_peers_guard.iter_mut() {
+            if peer.0 == port_address {
+                peer.1 = current_time;
+            }
+        }
+    }
+
+    // Remove peers that have not sent a heartbeat within the HEARTBEAT_TIMEOUT
+    active_peers_guard.retain(|peer| current_time - peer.1 < HEARTBEAT_TIMEOUT.as_secs());
 
 
+    // Print all active peers
+    println!("Active Peers: {:?}", active_peers_guard);
 
+    Ok(())
+}
+
+// ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // Helper/Integration Testing Functions
 /**
  * @noticd save_failed_transaction_json() is an async function that saves the most recent failed transaction as a
  * JSON file. This function is used to save the most recent failed transaction during integration testing.

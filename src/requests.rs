@@ -41,7 +41,7 @@ use crate::validation::ValidatorNode;
      Faucet {
          public_key: String,
      },
-     Consensus{ 
+     ConsensusRequest{ 
         request_hash: Vec<u8>,
         resonse_port: String,
     },
@@ -85,7 +85,7 @@ pub async fn send_account_creation_request(){
     let request_json = serde_json::to_string(&request).map_err(|e| io::Error::new(io::ErrorKind::Other, e)).unwrap();
 
     // Send the account creation request to the network
-    send_json_request(request_json).await;
+    send_json_request_to_all_ports(request_json).await;
 
     // print hunman readable account details
     print_human_readable_account_details(&secret_key, &public_key);
@@ -122,7 +122,7 @@ pub async fn send_transaction_request(sender_private_key: String, recipient_publ
     let request_json: String = serde_json::to_string(&request).unwrap();    
 
     // Send the transaction request to the network
-    send_json_request(request_json).await;
+    send_json_request_to_all_ports(request_json).await;
 }
 
 /**
@@ -136,7 +136,7 @@ pub async fn send_faucet_request(public_key: String)  {
     let request_json: String = serde_json::to_string(&request).unwrap();
 
     // Send the faucet request to the network
-    send_json_request(request_json).await;
+    send_json_request_to_all_ports(request_json).await;
 }
 
 /**
@@ -156,7 +156,7 @@ pub async fn send_consensus_request( request: Value, validator_node: ValidatorNo
     let client_request_hash: Vec<u8> = network::hash_network_request(request.clone()).await;
 
     // Package peer request in struct and serialize to JSON
-    let consensus_request = NetworkRequest::Consensus {
+    let consensus_request = NetworkRequest::ConsensusRequest {
         request_hash: client_request_hash.clone(),
         resonse_port: self_port.clone()
     };
@@ -165,7 +165,7 @@ pub async fn send_consensus_request( request: Value, validator_node: ValidatorNo
     let request_json: String = serde_json::to_string(&consensus_request).unwrap();
 
     // Send request to all outbound ports
-    send_json_request(request_json).await;
+    send_json_request_to_other_nodes(request_json, validator_node).await;
 }
 
 
@@ -175,7 +175,7 @@ pub async fn send_consensus_request( request: Value, validator_node: ValidatorNo
  * active and responces should be expected from the port_address in the HeartBeat msg folllowing a consensus request. 
  */
 pub async fn send_heartbeat_request(validator_node: ValidatorNode) {
-    println!("requests::send_heartbeat()...");
+    println!("\nrequests::send_heartbeat()...");
 
     // get client port and outbound ports
     let client_port: String = validator_node.client_port_address.clone();
@@ -185,16 +185,15 @@ pub async fn send_heartbeat_request(validator_node: ValidatorNode) {
     let heartbeat_json: String = serde_json::to_string(&heartbeat).unwrap();
 
     // Send the heartbeat signal to all outbound ports
-    send_json_request(heartbeat_json).await
+    send_json_request_to_other_nodes(heartbeat_json, validator_node).await
 }
 
 //------------------------------------ Helper Functions ------------------------------------//
 
 /**
- * @notice send_json_request() sends a json request to the network
+ * @notice send_json_request() sends a json request to all accepted ports on the network
  */
-async fn send_json_request(request_json: String) {
-    println!("requests::send_json_request() : sending serialized request to network...");
+async fn send_json_request_to_all_ports(request_json: String) {
 
     // Load accepted ports configuration
     let config_data: String = fs::read_to_string("accepted_ports.json").map_err(|e| io::Error::new(io::ErrorKind::Other, e)).unwrap();
@@ -202,9 +201,35 @@ async fn send_json_request(request_json: String) {
       
     // Send account creation request to all accepted po
     for node in config.nodes.iter() {
-        let addr = format!("{}:{}", node.address, node.port);
-        if let Ok(mut stream) = TcpStream::connect(&addr).await {
-            let _ = stream.write_all(request_json.as_bytes()).await;
+        let addr: String = format!("{}:{}", node.address, node.port);
+            if let Ok(mut stream) = TcpStream::connect(&addr).await {
+                let _ = stream.write_all(request_json.as_bytes()).await;
+            }
+    }
+}
+
+/**
+ * @notice send_json_request() sends a json request to all accepted ports on 
+ * the network that are not the client port stored in the validator node
+ */
+async fn send_json_request_to_other_nodes(request_json: String, validator_node: ValidatorNode) {
+
+    // Retrieve the client port address
+    let client_port: String = validator_node.client_port_address.clone();
+
+    // Load accepted ports configuration
+    let config_data: String = fs::read_to_string("accepted_ports.json").map_err(|e| io::Error::new(io::ErrorKind::Other, e)).unwrap();
+    let config: NetworkConfig = serde_json::from_str(&config_data).map_err(|e| io::Error::new(io::ErrorKind::Other, e)).unwrap();
+
+    // Send account creation request to all accepted po
+    for node in config.nodes.iter() {
+        let addr: String = format!("{}:{}", node.address, node.port);
+
+        // Only send the request to other nodes
+        if client_port != addr {
+            if let Ok(mut stream) = TcpStream::connect(&addr).await {
+                let _ = stream.write_all(request_json.as_bytes()).await;
+            }
         }
     }
 }

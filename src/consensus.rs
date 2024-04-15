@@ -60,7 +60,6 @@ struct BlockConsensusResponse {
     decision: bool,
 }
 
- 
 /**
  * @notice determine_majority() is an asynchronous function that determines the majority decision of the network based on the 
  * responses recieved from other validator nodes. Pre collected responces from the peer_consensus_decisions arc mutex hash map.
@@ -109,13 +108,10 @@ pub async fn determine_majority(request: Value, validator_node: validation::Vali
  * This function will retrieve the client decision from the request, package the response, and send the response back to the requesting node.
  * The funnction is called within the validator module.
  */
-pub async fn handle_block_consensus_request(request: Value, validator_node: validation::ValidatorNode) -> Result<(), std::io::Error> {
+pub async fn handle_consensus_request(request: Value, validator_node: validation::ValidatorNode) {
     println!("block_consensus::handle_block_consensus_request() : Handling block consensus request..."); 
 
-    // extract the port number and client block decisions from the validator node
-    let self_port: String = validator_node.client_port_address.clone();
-
-    // retrieve hash of request from request 
+    // retrieve request hash from request 
     let request_hash: Vec<u8> = request["request_hash"].as_str().unwrap().as_bytes().to_vec();
 
     // lock mutex and get client decision from validator node
@@ -123,56 +119,59 @@ pub async fn handle_block_consensus_request(request: Value, validator_node: vali
     let client_decisions_guard = client_decisions.lock().await;
     let client_decision: bool = client_decisions_guard.get(&request_hash).unwrap().clone();   
 
-    // Send response to client
-    respond_to_block_consensus_request(request_hash, client_decision, self_port).await;
-
-    Ok(())    
-}
-
-/**
- * @notice respond_to_block_consensus_request() is an asynchronous function that sends a response to a block consensus request
- * containing the client decision of whether or not to accept a new block into the blockchain. This function is used within the
- * handle_block_consensus_request() function.
- */
-async fn respond_to_block_consensus_request( client_request_hash: Vec<u8>, client_decision: bool, self_port: String ){
-    println!("block_consensus::respond_to_block_consensus_request() : Responding to block consensus request...");
-
     // Package responce in struct and serialize to JSON
     let consensus_responce = BlockConsensusResponse {
-        action: "block_consensus".to_string(),
-        request_hash: client_request_hash.clone(),
+        action: "ConsensusResponse".to_string(), 
+        request_hash, 
         decision: client_decision
     };
-
-    // Serialize responce to JSON
     let json_msg: String = serde_json::to_string(&consensus_responce).unwrap();
 
-    // Collect all outbound ports
-    let outbound_ports: Vec<String> = network::collect_outbound_ports(self_port.clone()).await.unwrap();
+    // retrieve response port from request
+    let response_port: String = request["response_port"].as_str().unwrap().to_string();
 
-    for port in outbound_ports.iter() {
-        println!("Port: {}", port);
-    }
+   // Connect to port and send message  
+    match TcpStream::connect(response_port.clone()).await {
 
-    // Connect to port and send msg to validator nodes
-    for port in outbound_ports.iter() {
-        println!("respond_to_block_consensus_request() : Sending block consensus request to: {}", port); 
+        // Send message to port if connection is successful
+        Ok(mut stream) => {
+            if let Err(e) = stream.write_all(json_msg.as_bytes()).await { eprintln!("Failed to send message to {}: {}", response_port, e); }
+            println!("respond_to_block_consensus_request() : Sending block consensus response to: {}", response_port); 
+         },
 
-        // Only Send Messages to other ports
-        if port != &self_port {
-
-            // Connect to port and send message  
-            match TcpStream::connect(port).await {
-
-                // Send message to port if connection is successful
-                Ok(mut stream) => {
-                    if let Err(e) = stream.write_all(json_msg.as_bytes()).await { eprintln!("Failed to send message to {}: {}", port, e); }
-                    println!("respond_to_block_consensus_request() : Sending block consensus request to: {}", port); 
-                },
-
-                // Print error message if connection fails
-                Err(_) => { println!("block_consensus::respond_to_block_consensus_request() : Failed to connect to {}, There may not be a listener...", port); }
-            }
-        }
+        // Print error message if connection fails
+        Err(_) => { println!("block_consensus::respond_to_block_consensus_request() : Failed to connect to {}, There may not be a listener...", response_port); }
     }
 }   
+
+pub async fn handle_consensus_response(request: Value, validator_node: validation::ValidatorNode) {
+    println!("block_consensus::handle_block_consensus_response() : Handling block consensus response..."); 
+
+    // get request hash from request
+    let request_hash: Vec<u8> = request["request_hash"].as_str().unwrap().as_bytes().to_vec();
+
+    // get client decision from request
+    let decision: bool = request["decision"].as_bool().unwrap();
+
+    // get peer decisions from validator node
+    let peer_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>> = validator_node.peer_decisions.clone();
+    let mut peer_decisions_guard = peer_decisions.lock().await;
+
+    // get counts from peer decisions
+    let mut true_count: u32 = 0; let mut false_count: u32 = 0;
+    if peer_decisions_guard.contains_key(&request_hash) {
+        true_count = peer_decisions_guard.get(&request_hash).unwrap().0;
+        false_count = peer_decisions_guard.get(&request_hash).unwrap().1;
+    }
+
+    // add client decision to counts
+    if decision { true_count += 1; } else { false_count += 1; }
+
+    // update peer decisions
+    peer_decisions_guard.insert(request_hash.clone(), (true_count, false_count));
+
+    println!("Votes for True: {} Votes for False: {}", true_count, false_count);
+
+}
+
+

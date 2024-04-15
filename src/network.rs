@@ -200,18 +200,20 @@ async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode )
                 }
 
             },
-            Some("Consensus") => { // Handle New Block Decision Request
+            Some("ConsensusRequest") => { // Handle New Block Decision Request
 
                 println!("Block Consensus Request Recieved...");
-                match consensus::handle_block_consensus_request( request, validator_node.clone()).await {
-                    Ok(_) => { println!("Block Consensus Request Handled..."); },
-                    Err(e) => { eprintln!("Block Consensus Request Failed: {}", e); }
-                }
+                consensus::handle_consensus_request( request, validator_node.clone()).await 
+            },
+            Some("ConsensusResponse") => { // Handle New Block Decision Request
+
+                println!("Block Consensus Request Recieved...");
+                consensus::handle_consensus_response( request, validator_node.clone()).await 
             },
             Some("HeartBeat") => { // Handle Heartbeat Request
 
                 println!("Heartbeat Request Recieved...");
-                match handle_heartbeat( request, validator_node.clone()).await {
+                match validation::handle_heartbeat( request, validator_node.clone()).await {
                     Ok(_) => { println!("Heartbeat Request Handled..."); },
                     Err(e) => { eprintln!("Heartbeat Request Failed: {}", e); }
                 }
@@ -259,35 +261,3 @@ pub async fn collect_outbound_ports(self_port: String) -> Result<Vec<String>, To
     Ok(outbound_ports)
 }
 
-/**
- * @notice handle_heartbeat_request() is an asynchronous function that handles incoming heartbeat requests from other nodes on the network.
- */
-async fn handle_heartbeat(request: Value, validator_node: ValidatorNode) -> Result<(), String> {
-    println!("network::handle_heartbeat_request()...");
-
-    // Extract the port address from the request
-    let port_address: String = request["port_address"].as_str()
-        .ok_or_else(|| "Failed to extract port address from heartbeat request".to_string())?
-        .to_string();
-
-    // Retrieve and lock the active_peers vector
-    let active_peers: Arc<Mutex<Vec<(String, u64)>>> = validator_node.active_peers.clone();
-    let mut active_peers = active_peers.lock().await;
-
-    // Get the current time
-    let current_time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-        .map_err(|_| "Failed to get current time".to_string())?
-        .as_secs();
-
-    // Update the timestamp for the peer that sent the heartbeat
-    for peer in &mut *active_peers {
-        if peer.0 == port_address {
-            peer.1 = current_time;
-        }
-    }
-
-    // Remove peers that have not sent a heartbeat within the HEARTBEAT_TIMEOUT
-    active_peers.retain(|peer| current_time - peer.1 < HEARTBEAT_TIMEOUT.as_secs());
-
-    Ok(())
-}
