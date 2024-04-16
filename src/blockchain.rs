@@ -6,6 +6,8 @@ use serde::{Serialize, Deserialize};
 use tokio::sync::{Mutex, MutexGuard};
 use std::sync::Arc;
 
+use crate::validation::ValidatorNode;
+
 /**
  * @notice blockchain.rs contains the structs and methods for creating and manipulating blocks in the blockchain.
  * There are three types of blocks in the blockchain: Genesis, Transaction, and Account Creation.
@@ -128,8 +130,6 @@ impl BlockChain {
         let genesis_block = Block::Genesis {time: time};
         self.chain.push(genesis_block);
     }
-
-    // Enqueue an incoming transaction     
 
     /**
      * @notice store_incoming_transaction() recieves data for a new transaction contained within the 
@@ -292,42 +292,30 @@ impl BlockChain {
         // Finalize the hash and return it
         hasher.finalize().to_vec()
     }
+}
 
-    // Loading the blockchain from a JSON file
-    pub fn load_json(&mut self) -> io::Result<()> {
+pub async fn save_chain_json(validator_node: ValidatorNode){
 
-        // TODO - this function will need to load in an up to date blockchain for the node. This  
-        // TODO - will eventually require a network request to a peer to get the latest blockchain.
+    // Lock blockchain for saving
+    let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();
+    let blockchain_guard: MutexGuard<'_, BlockChain> = blockchain.lock().await;
 
-        // Check if the BlockChain.json file exists
-        let path: &Path = Path::new("BlockChain.json");
-        if path.exists() {
+    // Retrieve the chain from the blockchain
+    let chain: Vec<Block> = blockchain_guard.chain.clone();
 
-            // Open the file and read its contents
-            let mut file = File::open(path)?;
-            let mut contents = String::new();
-            file.read_to_string(&mut contents)?;
-            let loaded_chain: Vec<Block> = serde_json::from_str(&contents)?;
+    // Get port number for node
+    let port: String = validator_node.client_port_address.clone();
 
-            // Check if the loaded_chain only contains the genesis block 
-            // replace with the loaded chain to restore chain locally
-            if self.chain.len() == 1 && loaded_chain.len() > 1 {
-                self.chain = loaded_chain;
-            }
-            Ok(())
-        } else {
-            Err(io::Error::new(io::ErrorKind::NotFound, "BlockChain.json not found"))
-        }
-    }
+    // Format directory name based on port number 
+    let dir: String = format!("Node_{}", port);
+    let path: String = format!("Node_{}/blockchain.json", port);
 
-    // Saving the blockchain to a JSON file
-    pub fn save_json(&self) -> io::Result<()> {
+    // creat directory 
+    std::fs::create_dir_all(dir.clone()).unwrap();
 
-        let file = File::create("BlockChain.json")?;
-        serde_json::to_writer_pretty(file, &self.chain)?;
-        Ok(())
-    }
-
+    // Serialize the blockchain to JSON
+    let file = File::create(path).unwrap();
+    serde_json::to_writer_pretty(file, &chain).unwrap();
 }
 
 
@@ -336,7 +324,7 @@ impl BlockChain {
  * client side. This function is called by verify_account_creation() and verify_transaction() after storing the request in the 
  * blockchain.
  */
-pub async fn print_chain_human_readable(blockchain: Arc<Mutex<BlockChain>>) { 
+pub async fn print_chain(blockchain: Arc<Mutex<BlockChain>>) { 
 
     // lock blockchain mutex for printing
     let blockchain_guard: MutexGuard<'_, BlockChain> = blockchain.lock().await; 

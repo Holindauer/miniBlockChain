@@ -14,43 +14,61 @@ use crate::network;
 use crate::requests;
 
 /**
- * @module validation.rs contains the necessary data structures for running a validator node, as well as the event handler logic for determining 
- * the validity of incoming requests recieved by the validator node. The validator node is responsible for verifying the correctness on the client 
- * side using the information known to the node. Then, once an indepdent decision is made, the node reaches out to peers for consensus on the 
- * request. If the network reaches a consensus that the request is valid, the request will be added to the blockchain and merkle tree. Otherwise,
- * the request will be rejected. Upon the  validation of a request, the update of the blockchain and merkle tree will also be performed within this 
- * module.
+ * @protocol validation.rs contains the data structures and event handler logic for running a validator node. 
+ * The network.rs module is the first to recieve requests into the network, to which it is filtered and passed 
+ * to the event handlers in this module. 
+ * 
+ * For each event handler, there is a general protocol followed: First, the client comes to an independent 
+ * decision on the validity of the request. This decision is stored. Then, the client sends a request to all 
+ * currently active peers (as tracked by the heartbeat mechanism) for their own independent decisions. The 
+ * client waits until the number of responses recieved matches the number of active peers. Once all responses
+ * are recieved, the client determines the majority decision and either writes coordinates the writing of the
+ * request to the blockchain or rejects it.
  */
+
+
 /**
- * @struct The ValidatorNode struct contains the local ledger state of this validator node. A well as other datastructures used to fascilitate
- * the validation process. All datastructures are wrapperd in Arc<Mutex<>> to allow for concurrent access by multiple tasks while avoiding race
- * conditions.
+ * @struct The ValidatorNode struct contains the local ledger state of this validator node. A well as other
+ * datastructures used to fascilitate the validation process. All datastructures are wrapperd in Arc<Mutex<>> 
+ * to allow for concurrent access by multiple tasks while avoiding race conditions.
  * 
- * @param blockchain: Arc<Mutex<BlockChain>> - The BlockChain struct is the ledger of all transactions that have occured on the network. It stores 
- * a linked list of Block enum structs (see blockchain.rs for details on this implementation). As new transactions are verified, they are added to
- * the blockchain.
+ * @param blockchain: Arc<Mutex<BlockChain>> - The BlockChain struct is the ledger of all transactions that 
+ * have occured on the network. It stores a linked list of Block enum structs (see blockchain.rs for details 
+ * on this implementation). As new transactions are verified, they are added to the blockchain.
  * 
- * @param merkle_tree: Arc<Mutex<MerkleTree>> - The merkle tree is a binary tree built built upwards from an iterable of account addresses that 
- * stores the account balances of all users on the network. As the tree is assembled, nodes are hashed into each other to produce a single root hash
- * that is used as unique identifier for the state of the stored accounts network at a given time.
+ * @param merkle_tree: Arc<Mutex<MerkleTree>> - The merkle tree is a binary tree built built upwards from an 
+ * iterable of account addresses that stores the account balances of all users on the network. As the tree is 
+ * assembled, nodes are hashed into each other to produce a single root hash that is used as unique identifier 
+ * for the state of the stored accounts network at a given time.
  * 
- * @param client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>> - This hashmap stores the decisions made by the client regarding the validity of
- * a given request. The key is the hash of the request and the value is a boolean representing the decision made by the client. This datastructure
- * is updated following the result of the independent validation of a request by the client.
+ * @param client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>> - This hashmap stores the decisions made by the 
+ * client regarding the validity of a given request. The key is the hash of the request and the value is a 
+ * boolean representing the decision made by the client. This datastructure is updated following the result of 
+ * the independent validation of a request by the client.
  * 
- * @param peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>> - This hashmap stores the decisions made by each peer validator node
- * on the network regarding the validity of a given request. The key is the hash of the request and the value is a tuple of u32 integers representing
- * the number of yays vs nays for the request collected by peers. Decisions within this datastructure are updated following the independent validation
- * by the client. After this point, the client will send a request to the network for consensus on the request. Responces recieved from the network
- * will be updated within this structure.
+ * @param peer_consensus_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>> - This hashmap stores the decisions 
+ * made by each peer validator node on the network regarding the validity of a given request. The key is the hash 
+ * of the request and the value is a tuple of u32 integers representing the number of yays vs nays for the request 
+ * collected by peers. Decisions within this datastructure are updated following the independent validation by the 
+ * client. After this point, the client will send a request to the network for consensus on the request. Responces 
+ * recieved from the network will be updated within this structure.
  * 
- * @param client_port_address: String - The port address that the client is listening on for incoming connections. This is used to establish a
- * connection with the client from the network.
+ * @param client_port_address: String - The port address that the client is listening on for incoming connections. 
+ * This is used to establish a connection with the client from the network.
  * 
- * @param active_peers: Arc<Mutex<Vec<(String, u64)>>> - A vector of (String, u64) tuples containing the addresses of all active peers (as represented 
- * by their port address) on the network and the timestamp of the last recieved heartbeat from this peer. This datastructure is maintained by the 
- * validator node via a blocked on heartbeat protocol that listens for the periodic heartbeat of other nodes on the network. Nodes that fail to send a 
+ * @param active_peers: Arc<Mutex<Vec<(String, u64)>>> - A vector of (String, u64) tuples containing the addresses 
+ * of all active peers (as represented by their port address) on the network and the timestamp of the last recieved 
+ * heartbeat from this peer. This datastructure is maintained by the validator node via a blocked on heartbeat 
+ * protocol that listens for the periodic heartbeat of other nodes on the network. Nodes that fail to send a 
  * heartbeat within a given time frame are removed from the active peers list.
+ * 
+ * @param total_peers: Arc<Mutex<usize>> - The total number of active peers on the network. This value is updated
+ * when the active_peers datastructure is updated. It is used to determine when all responses have been recieved
+ * for a given request.
+ * 
+ * @param notify: Arc<Notify> - A tokio sync Notify struct that is used to notify the validator node when all
+ * responses have been recieved for a given request. This is used to break out of the loop that waits for responses
+ * from the network.
  */
 #[derive(Clone)]
 pub struct ValidatorNode {
@@ -64,8 +82,8 @@ pub struct ValidatorNode {
     pub client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>,
     pub client_port_address: String,    
     pub active_peers: Arc<Mutex<Vec<(String, u64)>>>, 
-    pub total_peers: Arc<Mutex<usize>>, // Track the number of active peers expected to respond
-    pub notify: Arc<Notify>, // Notify the validator node when all responses have been recieved
+    pub total_peers: Arc<Mutex<usize>>, 
+    pub notify: Arc<Notify>, 
 }
 
 impl ValidatorNode { // initializes datastructures
@@ -77,7 +95,7 @@ impl ValidatorNode { // initializes datastructures
             client_decisions: Arc::new(Mutex::new(HashMap::new())),
             client_port_address: String::new(),
             active_peers: Arc::new(Mutex::new(Vec::new())),
-            total_peers: Arc::new(Mutex::new(0)), // Initialize with zero, will be set when peers are known
+            total_peers: Arc::new(Mutex::new(0)), // Init to zero, will be set when peers are known
             notify: Arc::new(Notify::new()),
         }
     }
@@ -135,8 +153,8 @@ impl ValidatorNode { // initializes datastructures
  * the ValidatorNode struct, sending a request to active peer node for the majority state of the networks and connecting a TCP 
  * listener to the network to start listening for incomring requests.
  */
-pub async fn run_validation(private_key: &String) { // TODO implemnt private key/staking idea. Private key to send tokens to
-    println!("\nvalidation::run_validation() : Booting up validator node..."); 
+pub async fn run_validation(private_key: &String) {
+    println!("\nBooting up validator node..."); 
 
     // init validator node struct w/ empty blockchain and merkle tree
     let validator_node: ValidatorNode = ValidatorNode::new();
@@ -155,8 +173,8 @@ pub async fn run_validation(private_key: &String) { // TODO implemnt private key
  * recieved request for a new account creation. This function is responsible for fascilitating the independent validation of the request, sending
  * a request to the network for consensus, and adding the account to the ledger if the network reaches a consensus that the request is valid. 
  */
-pub async fn handle_account_creation_request( request: Value, validator_node: ValidatorNode) -> Result<String, String> { 
-    println!("validation::handle_account_creation_request()...");
+pub async fn handle_account_creation_request( request: Value, validator_node: ValidatorNode) -> Result<(), String> { 
+    println!("Handling account creation request...");
 
     // perform independent vallidation and store decision in validator node struct
     verify_account_creation_independently(request.clone(), validator_node.clone()).await;
@@ -174,18 +192,15 @@ pub async fn handle_account_creation_request( request: Value, validator_node: Va
 
     // Determine if the client's decision is the majority decision
     let peer_majority_decision: bool = consensus::determine_majority(request.clone(), validator_node.clone()).await;
-
-    // print majority decision
-    println!("validation::handle_account_creation_request() : Majority Decision: {}", peer_majority_decision);
+    println!("Majority Decision: {}", peer_majority_decision);
 
     // return error if network consensus not reached
-    if (peer_majority_decision == false) { return Err("Network agreed the request was invalid".to_string());}
+    if (peer_majority_decision == false) { return Err("invalid request".to_string());}
 
     // add the account to the ledger
     add_account_creation_to_ledger(request.clone() ,validator_node.clone()).await;
 
-    // Return validated public key as a string
-    Ok(request["public_key"].as_str().unwrap_or_default().to_string())
+    Ok(())
 }
 
 
@@ -195,7 +210,7 @@ pub async fn handle_account_creation_request( request: Value, validator_node: Va
  * client block decisions hashmap with the decision to accept the request.
  */
 async fn verify_account_creation_independently( request: Value, validator_node: ValidatorNode) {
-    println!("validation::verify_account_creation_independently()...");
+    println!("Performing Independent Validation of Account Creation Request...");
 
     // get public key from request
     let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
@@ -207,7 +222,7 @@ async fn verify_account_creation_independently( request: Value, validator_node: 
     // make decision upone whether the account already exist in the tree
     let decision: bool;
     if merkle_tree_guard.account_exists(public_key.clone()) { decision = false; }else { decision = true; }
-    println!("validation::verify_account_creation_independently() : Client decision: {}", decision);
+    println!("Client decision: {}", decision);
 
     // use SHA256 to hash the request
     let client_request_hash: Vec<u8> = network::hash_network_request(request).await;
@@ -217,9 +232,7 @@ async fn verify_account_creation_independently( request: Value, validator_node: 
     let mut client_decisions_guard: MutexGuard<HashMap<Vec<u8>, bool>> = client_decisions.lock().await;
 
     // insert the decision in the client decision map
-    client_decisions_guard.insert(
-        client_request_hash.clone(), decision
-    ); 
+    client_decisions_guard.insert(client_request_hash.clone(), decision); 
 }
 
 /**
@@ -228,7 +241,7 @@ async fn verify_account_creation_independently( request: Value, validator_node: 
  * has been verified.
  */
 async fn add_account_creation_to_ledger( request: Value, validator_node: ValidatorNode ) {
-    println!("validation::add_account_creation_to_ledger()...");
+    println!("Adding Account Creation to Local Ledger...");
 
     // Retrieve public key and obfuscated private key hash from request
     let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
@@ -269,8 +282,8 @@ async fn add_account_creation_to_ledger( request: Value, validator_node: Validat
  * @dev The function will verify the validity of the transaction request, update the sender and recipient balances in the
  * merkle tree, and store the request in the blockchain.
  */
-pub async fn handle_transaction_request(request: Value, validator_node: ValidatorNode) -> Result<bool, String> { // TODO Simplify/decompose this function
-    println!("validation::handle_transaction_request() : Handling transaction request..."); 
+pub async fn handle_transaction_request(request: Value, validator_node: ValidatorNode) -> Result<bool, String> { 
+    println!("vHandling transaction request..."); 
 
     // verify the transaction independently 
     verify_transaction_independently(request.clone(), validator_node.clone()).await;
@@ -288,9 +301,6 @@ pub async fn handle_transaction_request(request: Value, validator_node: Validato
 
     // Determine if the client's decision is the majority decision
     let peer_majority_decision: bool = consensus::determine_majority(request.clone(), validator_node.clone()).await;
-
-    // print majority decision
-    println!("validation::handle_transaction_request() : Majority Decision: {}", peer_majority_decision);
 
     // return false if network consensus not reached
     if (peer_majority_decision == false) { return Ok(false);}
@@ -310,8 +320,7 @@ pub async fn handle_transaction_request(request: Value, validator_node: Validato
  * transaction.
  */
 async fn verify_transaction_independently(request: Value, validator_node: ValidatorNode)-> bool {
-    println!("validation::verify_transaction_independently()...");
-
+    println!("Performing Independent Validation of Transaction Request...");
   
     // retrieve sender and recipient addresses from request
     let sender_address: Vec<u8> = request["sender_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
@@ -366,7 +375,7 @@ async fn verify_transaction_independently(request: Value, validator_node: Valida
  * entire network to both the merkle tree and the blockchain. 
 */
 async fn add_transaction_to_ledger(request: Value, validator_node: ValidatorNode) {
-    println!("validation::add_transaction_to_ledger()...");
+    println!("Adding transaction to ledger...");
 
     // get the sender and recipient addresses from the request
     let sender_address: Vec<u8> = request["sender_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
@@ -417,13 +426,14 @@ async fn add_transaction_to_ledger(request: Value, validator_node: ValidatorNode
  * This results in an account balance increase of FAUCET_AMOUNT for the provided public key. This function is called by 
  * handle_incoming_message() when a new faucet request is received.
  */
-pub async fn handle_faucet_request(request: Value, validator_node: ValidatorNode) -> Result<(), String> {
-    println!("validation::verify_faucet_request()...");
+pub async fn handle_faucet_request(request: Value, validator_node: ValidatorNode) {
+    println!("Handling request to use faucet...");
 
     // verify the faucet request independently
-    if verify_faucet_request_independently(request.clone(), validator_node.clone()).await != true { 
-        return Err("Account doesn't exists".to_string()); 
-    }
+    if verify_faucet_request_independently(
+        request.clone(), validator_node.clone()
+
+    ).await != true {  return; }
 
     // Prepare for responses (updating the count of active peers)
     validator_node.prepare_for_responses().await;
@@ -437,18 +447,15 @@ pub async fn handle_faucet_request(request: Value, validator_node: ValidatorNode
     ).await;
 
     // Determine if the client's decision is the majority decision
-    let peer_majority_decision: bool = consensus::determine_majority(request.clone(), validator_node.clone()).await;
-
-    // print majority decision
-    println!("validation::handle_faucet_request() : Majority Decision: {}", peer_majority_decision);
+    let peer_majority_decision: bool = consensus::determine_majority(
+        request.clone(), validator_node.clone()
+    ).await;
 
     // return error if network consensus not reached
-    if (peer_majority_decision == false) { return Err("Network agreed the request was invalid".to_string());}
+    if (peer_majority_decision == false) { return; }
 
     // add the faucet request to the ledger
     add_faucet_request_to_ledger(request.clone(), validator_node.clone()).await;
-
-    Ok(())
 }
 
 /**
@@ -457,7 +464,7 @@ pub async fn handle_faucet_request(request: Value, validator_node: ValidatorNode
  * validator nodes to determine a majority decision that will be accepted by the network regardless of the individual validator node's decision.
  */
 async fn verify_faucet_request_independently(request: Value, validator_node: ValidatorNode) -> bool {
-    println!("validation::verify_faucet_request_independently()...");
+    println!("Performing independent validation of faucet request..");
 
     // Lock the merkle tree while accessing sender account info
     let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
@@ -490,7 +497,7 @@ async fn verify_faucet_request_independently(request: Value, validator_node: Val
  * verified by the entire network. This function is called by handle_faucet_request() after the faucet request has been verified.
  */
 async fn add_faucet_request_to_ledger(request: Value, validator_node: ValidatorNode) {
-    println!("validation::add_faucet_request_to_ledger()...");
+    println!("Adding faucet request to ledger...");
 
     // Lock the merkle tree for writing
     let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
@@ -527,7 +534,7 @@ async fn add_faucet_request_to_ledger(request: Value, validator_node: ValidatorN
  * @notice handle_heartbeat_request() is an asynchronous function that handles incoming heartbeat requests from other nodes on the network.
  */
 pub async fn handle_heartbeat(request: Value, validator_node: ValidatorNode) -> Result<(), String> {
-    println!("network::handle_heartbeat_request()...");
+    println!("Handling heartbeat recieved...");
 
     // Extract the port address from the request
     let port_address: String = request["port_address"].as_str()

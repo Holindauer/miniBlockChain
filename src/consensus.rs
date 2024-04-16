@@ -67,20 +67,13 @@ struct BlockConsensusResponse {
  * The funnction is called within the validator module.
  */
 pub async fn handle_consensus_request(request: Value, validator_node: validation::ValidatorNode) {
-    println!("block_consensus::handle_block_consensus_request() : Handling block consensus request..."); 
+    println!("Handling request from peer for consensus..."); 
 
-    // print the request json
-    println!("Request: {}", request);
-
-    // retrieve request hash from request 
     // retrieve request hash from request as a vector of u8
     let request_hash: Vec<u8> = request["request_hash"].as_array().unwrap()
                                      .iter()
                                      .map(|x| x.as_u64().unwrap() as u8)
                                      .collect();
-
-    // print the request hash
-    println!("Request Hash: {:?}", request_hash);
 
     // lock mutex and get client decision from validator node
     let client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>= validator_node.client_decisions.clone();
@@ -103,17 +96,22 @@ pub async fn handle_consensus_request(request: Value, validator_node: validation
 
         // Send message to port if connection is successful
         Ok(mut stream) => {
-            if let Err(e) = stream.write_all(json_msg.as_bytes()).await { eprintln!("Failed to send message to {}: {}", response_port, e); }
-            println!("respond_to_block_consensus_request() : Sending block consensus response to: {}", response_port); 
+
+            // Write to the Stream
+            if let Err(e) = stream.write_all(json_msg.as_bytes()).await { 
+                eprintln!("Failed to send message to {}: {}", response_port, e); 
+                return;
+            }
+            println!("Sent repsonse to conensus request to: {}", response_port); 
          },
 
         // Print error message if connection fails
-        Err(_) => { println!("block_consensus::respond_to_block_consensus_request() : Failed to connect to {}, There may not be a listener...", response_port); }
+        Err(_) => { println!("Failed to connect to {}, There may not be a listener...", response_port); }
     }
 }   
 
 pub async fn handle_consensus_response(request: Value, validator_node: validation::ValidatorNode) {
-    println!("block_consensus::handle_block_consensus_response() : Handling block consensus response..."); 
+    println!("Handling consensus request reponse from peer..."); 
 
     // get request hash from request
     let request_hash: Vec<u8> = request["request_hash"].as_array().unwrap()
@@ -145,7 +143,7 @@ pub async fn handle_consensus_response(request: Value, validator_node: validatio
     let notify: Arc<Notify> = validator_node.notify.clone();
     notify.notify_one();
 
-    println!("Peer Votes for True: {} Votes for False: {}", true_count, false_count);
+    println!("Current peer votes to accept transaction: {}, votes to reject: {}", true_count, false_count);
 
 }
 
@@ -155,7 +153,7 @@ pub async fn handle_consensus_response(request: Value, validator_node: validatio
  * responses recieved from other validator nodes. Pre collected responces from the peer_consensus_decisions arc mutex hash map.
  */
 pub async fn determine_majority(request: Value, validator_node: validation::ValidatorNode) -> bool {
-    println!("consensus::determine_majority() : Determining majority decision by peers..."); 
+    println!("Determining majority decision by peers..."); 
 
     // get block decision from validator node
     let peer_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>> = validator_node.peer_decisions.clone();
@@ -187,7 +185,10 @@ pub async fn determine_majority(request: Value, validator_node: validation::Vali
     } 
 
     // return the decision 
-    if true_count > false_count { true } else { false }
+    let peer_decision: bool = true_count > false_count;
+    println!("Final votes to accept: {}, votes to reject: {}", true_count, false_count);
+
+    peer_decision
     
 }
 
