@@ -28,41 +28,13 @@ use crate::validation::ValidatorNode;
  */
 
 
-/**
- * @notice TransactionRequest structs packages information about a single request to write information to the blockchain.
- * @dev The two types of writing requests are: Transaction and NewAccount.
- * @dev All addresses are stored as UTF-8 encoded byte vectors.
- * @param senderNonce - the nonce of the sender. (num transactions sender has made).
-*/  
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum NewBlock {
-    Transaction {
-        sender_address: Vec<u8>,
-        sender_balance: u64,
-        sender_nonce: u64,
-        recipient_address: Vec<u8>,
-        recipient_balance: u64,
-        amount: u64,
-        time: u64,
-    }, 
-    NewAccount {
-        address: Vec<u8>,
-        account_balance: u64,
-        time: u64,
-    },
-    Faucet {
-        address: Vec<u8>,
-        account_balance: u64,
-        time: u64,
-    }
-}
 
  /**
   * @notice Block is an enum that represents the different types of blocks that can be added to the blockchain.
   * @dev The Block enum is used to store the data of the block and differentiate between the different types of blocks.
   * @dev All addresses are stored as UTF-8 encoded byte vectors.
 */
-#[derive(Debug, Clone, Serialize, Deserialize)] // TODO update block info to include account balances
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)] 
 pub enum Block {
     Genesis { 
         time : u64
@@ -91,6 +63,7 @@ pub enum Block {
     }
 }
 
+
 /**
  * @notice the Blockchain struct links Blocks in a linked list.
  * @param chain - a vector of Blocks that have been added to the blockchain.
@@ -105,7 +78,7 @@ pub enum Block {
 pub struct BlockChain {
     pub chain: Vec<Block>,                                         
     pending_request_queue: VecDeque<Vec<u8>>,          // queue of public keys
-    joint_request_map: HashMap<Vec<u8>, Vec<NewBlock>>, // map of public keys to transactions
+    joint_request_map: HashMap<Vec<u8>, Vec<Block>>, // map of public keys to transactions
 }
 
 /**
@@ -146,13 +119,14 @@ impl BlockChain {
      * @dev the sender's address is pushed to the pending_transactions_queue and the transaction is
      * added to the joint_transactions_map, using the sender's address as the key.
      */
-    pub fn store_incoming_requests(&mut self, request: &NewBlock) {
+    pub fn store_incoming_requests(&mut self, newBlockRequest: &Block) {
 
         // Retrieve and clone relavant address from the request
-        let address: Vec<u8> = match &request {
-            NewBlock::Transaction { sender_address, .. } => sender_address,
-            NewBlock::NewAccount { address, .. } => address,
-            NewBlock::Faucet { address, .. } => address,
+        let address: Vec<u8> = match &newBlockRequest {
+            Block::Transaction { sender, .. } => sender,
+            Block::NewAccount { address, .. } => address,
+            Block::Faucet { address, .. } => address,
+            Block::Genesis { .. } => panic!("Invalid request type"),
         }.clone();
     
         // Push the address to the pending request queue
@@ -161,73 +135,33 @@ impl BlockChain {
         // Insert the request into the joint_request_map, creating a new entry if necessary
         self.joint_request_map.entry(address)
             .or_insert_with(Vec::new)
-            .push(request.clone());
+            .push(newBlockRequest.clone());
     }
 
-
-    // Method to create a new block from a request and add it to the blockchain
-    pub fn push_block_to_chain(&mut self, request: NewBlock) {
+   // Method to create a new block from a request and add it to the blockchain
+    pub fn push_block_to_chain(&mut self, new_block: Block) {
         
-        // init hash for block
-        let hash: Vec<u8> = Vec::new();
-
-        // Create Block from request
-        let (address, mut block): (Vec<u8>, Block) = match &request {
-
-            // package transaction request data into a block
-            NewBlock::Transaction { 
-                sender_address, sender_balance, recipient_address, recipient_balance, amount, time, sender_nonce 
-            } => {
-
-                // return tup w/ address and new block
-                (sender_address.clone(), Block::Transaction {
-                    sender: sender_address.clone(), 
-                    sender_balance: *sender_balance,
-                    recipient: recipient_address.clone(), 
-                    recipient_balance: *recipient_balance,
-                    amount: *amount,  
-                    time: *time, 
-                    sender_nonce: *sender_nonce + 1, 
-                    hash 
-                })
-            },
-            // package new account request data into a block
-            NewBlock::NewAccount { address, account_balance, time } => {
-
-                // return tup w/ address and new block
-                (address.clone(), Block::NewAccount { 
-                    address: address.clone(), 
-                    account_balance: *account_balance,
-                    time: *time, 
-                    hash 
-                })
-            },
-
-            // package faucet request data into a block
-            NewBlock::Faucet { address, account_balance, time } => {
-
-                // return tup w/ address and new block
-                (address.clone(), Block::Faucet { 
-                    address: address.clone(), 
-                    account_balance: *account_balance,
-                    time: *time, 
-                    hash 
-                })
-            },
-        };
+        // get address of sender
+        let address: Vec<u8> = match &new_block {
+            Block::Transaction { sender, .. } => sender,
+            Block::NewAccount { address, .. } => address,
+            Block::Faucet { address, .. } => address,
+            _ => panic!("Invalid request type"),
+        }.clone();
 
         // Set the hash of the block
-        self.hash_block_data(&mut block);
+        let mut new_block = new_block.clone();
+        self.hash_block_data(&mut new_block);
 
         // Push the new block to the blockchain
-        self.chain.push(block);    
+        self.chain.push(new_block.clone());    
         self.pending_request_queue.pop_front(); // Remove leading address from the queue
     
         // retrieve mutable vector of all requests from the sender
         if let Some(requests) = self.joint_request_map.get_mut(&address) {             
 
             // Remove the request from requests Vec that matches the one added to the blockchain
-            if let Some(index) = requests.iter().position(|r| *r == request) { requests.remove(index); }
+            if let Some(index) = requests.iter().position(|r| *r == new_block) { requests.remove(index); }
         }
     }
 
@@ -393,72 +327,21 @@ pub async fn print_chain(blockchain: Arc<Mutex<BlockChain>>) {
     }
 }
 
-/**
- * @notice save_most_recent_block_json() is an asynchronous function that saves the most recent block in the 
- * blockchain as a JSON file. This function is used to save the most recent block during integration testing.
- */
-#[derive(Serialize)]
-#[serde(untagged)]
-enum BlockJson {
-    Genesis { 
-        time: u64 
-    },
-    Transaction {
-         sender: String, 
-         sender_balance: u64, 
-         recipient: String, 
-         recipient_balance: u64,
-         amount: u64, 
-         time: u64, 
-         sender_nonce: u64, 
-         hash: String, 
-        },
-    NewAccount {
-        address: String, 
-        account_balance: u64,
-        time: u64, 
-        hash: String, 
-    },
-}
+
 
 /**
  * @notice save_most_recent_block_json() is an asynchronous function that saves the most recent block in the
  * blockchain as a JSON file. This function is used to save the most recent block during integration testing.
  */
 pub async fn save_most_recent_block_json(blockchain: Arc<Mutex<BlockChain>>) {
-    let blockchain_guard: MutexGuard<'_, BlockChain> = blockchain.lock().await;
 
-    if let Some(most_recent_block) = blockchain_guard.chain.last() {
-        let block_json: BlockJson = match most_recent_block {
-            Block::Genesis { time } => BlockJson::Genesis { time: *time },
-            Block::Transaction { sender, sender_balance, recipient, recipient_balance, amount, time, sender_nonce, hash } => BlockJson::Transaction {
-                sender: String::from_utf8(sender.clone()).unwrap_or_default(),
-                sender_balance: *sender_balance,
-                recipient: String::from_utf8(recipient.clone()).unwrap_or_default(),
-                recipient_balance: *recipient_balance,
-                amount: *amount,
-                time: *time,
-                sender_nonce: *sender_nonce,
-                hash: hex::encode(hash),
-            },
-            Block::NewAccount { address, account_balance, time, hash } => BlockJson::NewAccount {
-                address: String::from_utf8(address.clone()).unwrap_or_default(),
-                account_balance: *account_balance,
-                time: *time,
-                hash: hex::encode(hash),
-            },
-            Block::Faucet { address, account_balance, time, hash } => BlockJson::NewAccount {
-                address: String::from_utf8(address.clone()).unwrap_or_default(),
-                account_balance: *account_balance,
-                time: *time,
-                hash: hex::encode(hash),
-            },
-        };
-        let message_json = serde_json::to_string(&block_json).unwrap();
-        std::fs::write("most_recent_block.json", message_json).unwrap();
-    } else {
-        eprintln!("Blockchain is empty.");
-    }
+    // lock and copy the blockchain
+    let blockchain_guard: MutexGuard<'_, BlockChain> = blockchain.lock().await;
+    let blockchain_copy: BlockChain = blockchain_guard.clone();
+
+    // save the blockchain to a JSON file
+    let message_json = serde_json::to_string(&blockchain_copy).unwrap();
+    std::fs::write("most_recent_block.json", message_json).unwrap();
 }
 
 /**
@@ -487,10 +370,11 @@ pub async fn save_most_recent_block_json(blockchain: Arc<Mutex<BlockChain>>) {
         // Simulate account creation request
         let new_address = vec![0u8; 20]; // Dummy address for testing
         let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-        let request = NewBlock::NewAccount {
+        let request = Block::NewAccount {
             address: new_address.clone(),
             account_balance: 0,
             time,
+            hash: Vec::new(), // Placeholder hash
         };
 
         // Assume validation is successful and directly push the request to the chain

@@ -4,8 +4,7 @@ use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 use std::collections::HashMap;
 
-use crate::blockchain;
-use crate::blockchain::{BlockChain, NewBlock};
+use crate::blockchain::{BlockChain, Block};
 use crate::merkle_tree::{MerkleTree, Account};
 use crate::constants::{FAUCET_AMOUNT, HEARTBEAT_TIMEOUT};
 use crate::consensus;
@@ -262,10 +261,12 @@ async fn add_account_creation_to_ledger( request: Value, validator_node: Validat
     let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
     // Package request details in Request enum 
-    let new_account_request = NewBlock::NewAccount { 
+    let new_account_request = Block::NewAccount { 
         address: public_key, 
         account_balance: 0,
-        time: time, };
+        time: time, 
+        hash: Vec::new(),
+    };
 
     // Lock blockchain for writing
     let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();    
@@ -408,14 +409,15 @@ async fn add_transaction_to_ledger(request: Value, validator_node: ValidatorNode
     merkle_tree_guard.change_balance(recipient_address.clone(), recipient_balance);
     
     // Package request details in Request enum 
-    let new_account_request = NewBlock::Transaction {  // TODO this could probably be replaced by the block struct itself
-        sender_address,  
+    let new_account_request = Block::Transaction {  // TODO this could probably be replaced by the block struct itself
+        sender: sender_address,  
         sender_balance,
         sender_nonce, 
-        recipient_address, 
+        recipient: recipient_address, 
         recipient_balance,
         amount, 
         time, 
+        hash: Vec::new(),
     };
 
     // Retrieve and lock the blockchain
@@ -524,10 +526,14 @@ async fn add_faucet_request_to_ledger(request: Value, validator_node: ValidatorN
 
     // Update the blockchain with the faucet request
     let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-    let new_account_request = NewBlock::Faucet { 
+
+    // Package processed request details in a Block
+    let new_account_request = Block::Faucet { 
         address: public_key, 
         account_balance: new_balance,
-        time: time, };
+        time: time, 
+        hash: Vec::new(),
+    };
     
     // Lock blockchain for writing
     let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();
