@@ -1,4 +1,5 @@
 use sha2::{Sha256, Digest};
+use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::{HashMap, VecDeque};
 use std::{fs::File, io::{self, Read}, path::Path};
@@ -34,20 +35,24 @@ use crate::validation::ValidatorNode;
  * @param senderNonce - the nonce of the sender. (num transactions sender has made).
 */  
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum Request {
+pub enum NewBlock {
     Transaction {
         sender_address: Vec<u8>,
+        sender_balance: u64,
         sender_nonce: u64,
         recipient_address: Vec<u8>,
+        recipient_balance: u64,
         amount: u64,
         time: u64,
     }, 
     NewAccount {
-        new_address: Vec<u8>,
+        address: Vec<u8>,
+        account_balance: u64,
         time: u64,
     },
     Faucet {
         address: Vec<u8>,
+        account_balance: u64,
         time: u64,
     }
 }
@@ -64,7 +69,9 @@ pub enum Block {
     },
     Transaction { 
         sender: Vec<u8>, 
+        sender_balance: u64,
         recipient: Vec<u8>, 
+        recipient_balance: u64,
         amount: u64, 
         time : u64, 
         sender_nonce: u64, 
@@ -72,11 +79,13 @@ pub enum Block {
     },
     NewAccount { 
         address: Vec<u8>, 
+        account_balance: u64,
         time: u64, 
         hash: Vec<u8>
     },
     Faucet { 
         address: Vec<u8>, 
+        account_balance: u64,
         time: u64, 
         hash: Vec<u8>
     }
@@ -96,7 +105,7 @@ pub enum Block {
 pub struct BlockChain {
     pub chain: Vec<Block>,                                         
     pending_request_queue: VecDeque<Vec<u8>>,          // queue of public keys
-    joint_request_map: HashMap<Vec<u8>, Vec<Request>>, // map of public keys to transactions
+    joint_request_map: HashMap<Vec<u8>, Vec<NewBlock>>, // map of public keys to transactions
 }
 
 /**
@@ -137,13 +146,13 @@ impl BlockChain {
      * @dev the sender's address is pushed to the pending_transactions_queue and the transaction is
      * added to the joint_transactions_map, using the sender's address as the key.
      */
-    pub fn store_incoming_requests(&mut self, request: &Request) {
+    pub fn store_incoming_requests(&mut self, request: &NewBlock) {
 
         // Retrieve and clone relavant address from the request
         let address: Vec<u8> = match &request {
-            Request::Transaction { sender_address, .. } => sender_address,
-            Request::NewAccount { new_address, .. } => new_address,
-            Request::Faucet { address, .. } => address,
+            NewBlock::Transaction { sender_address, .. } => sender_address,
+            NewBlock::NewAccount { address, .. } => address,
+            NewBlock::Faucet { address, .. } => address,
         }.clone();
     
         // Push the address to the pending request queue
@@ -157,7 +166,7 @@ impl BlockChain {
 
 
     // Method to create a new block from a request and add it to the blockchain
-    pub fn push_request_to_chain(&mut self, request: Request) {
+    pub fn push_block_to_chain(&mut self, request: NewBlock) {
         
         // init hash for block
         let hash: Vec<u8> = Vec::new();
@@ -166,12 +175,16 @@ impl BlockChain {
         let (address, mut block): (Vec<u8>, Block) = match &request {
 
             // package transaction request data into a block
-            Request::Transaction { sender_address, recipient_address, amount, time, sender_nonce } => {
+            NewBlock::Transaction { 
+                sender_address, sender_balance, recipient_address, recipient_balance, amount, time, sender_nonce 
+            } => {
 
                 // return tup w/ address and new block
                 (sender_address.clone(), Block::Transaction {
                     sender: sender_address.clone(), 
+                    sender_balance: *sender_balance,
                     recipient: recipient_address.clone(), 
+                    recipient_balance: *recipient_balance,
                     amount: *amount,  
                     time: *time, 
                     sender_nonce: *sender_nonce + 1, 
@@ -179,22 +192,24 @@ impl BlockChain {
                 })
             },
             // package new account request data into a block
-            Request::NewAccount { new_address, time } => {
+            NewBlock::NewAccount { address, account_balance, time } => {
 
                 // return tup w/ address and new block
-                (new_address.clone(), Block::NewAccount { 
-                    address: new_address.clone(), 
+                (address.clone(), Block::NewAccount { 
+                    address: address.clone(), 
+                    account_balance: *account_balance,
                     time: *time, 
                     hash 
                 })
             },
 
             // package faucet request data into a block
-            Request::Faucet { address, time } => {
+            NewBlock::Faucet { address, account_balance, time } => {
 
                 // return tup w/ address and new block
                 (address.clone(), Block::Faucet { 
                     address: address.clone(), 
+                    account_balance: *account_balance,
                     time: *time, 
                     hash 
                 })
@@ -225,19 +240,23 @@ impl BlockChain {
             Block::Genesis { time, .. } => {
                 hasher.update(time.to_string().as_bytes());
             }
-            Block::Transaction { sender, recipient, amount, time, sender_nonce, .. } => {
+            Block::Transaction { sender, sender_balance, recipient, recipient_balance, amount, time, sender_nonce, .. } => {
                 hasher.update(sender);
+                hasher.update(&sender_balance.to_be_bytes());
                 hasher.update(recipient);
+                hasher.update(&recipient_balance.to_be_bytes());
                 hasher.update(&amount.to_be_bytes());
                 hasher.update(time.to_string().as_bytes());
                 hasher.update(sender_nonce.to_string().as_bytes());
             }
-            Block::NewAccount { address, time, .. } => {
+            Block::NewAccount { address, account_balance, time, .. } => {
                 hasher.update(address);
+                hasher.update(&account_balance.to_string().as_bytes());
                 hasher.update(time.to_string().as_bytes());
             }
-            Block::Faucet { address, time, .. } => {
+            Block::Faucet { address, account_balance, time, .. } => {
                 hasher.update(address);
+                hasher.update(account_balance.to_string().as_bytes());
                 hasher.update(time.to_string().as_bytes());
             }
         }
@@ -268,21 +287,25 @@ impl BlockChain {
                 Block::Genesis { time } => {
                     hasher.update(time.to_string().as_bytes());
                 }
-                Block::Transaction { sender, recipient, amount, time, sender_nonce, hash } => {
+                Block::Transaction { sender, sender_balance, recipient, recipient_balance, amount, time, sender_nonce, hash  } => {
                     hasher.update(sender);
+                    hasher.update(&sender_balance.to_be_bytes());
                     hasher.update(recipient);
+                    hasher.update(&recipient_balance.to_be_bytes());
                     hasher.update(&amount.to_be_bytes());
                     hasher.update(time.to_string().as_bytes());
                     hasher.update(sender_nonce.to_string().as_bytes());
                     hasher.update(hash);
                 }
-                Block::NewAccount { address, time, hash } => {
+                Block::NewAccount { address, account_balance, time, hash } => {
                     hasher.update(address);
+                    hasher.update(&account_balance.to_string().as_bytes());
                     hasher.update(time.to_string().as_bytes());
                     hasher.update(hash);
                 }
-                Block::Faucet { address, time, hash } => {
+                Block::Faucet { address, account_balance, time, hash } => {
                     hasher.update(address);
+                    hasher.update(account_balance.to_string().as_bytes());
                     hasher.update(time.to_string().as_bytes());
                     hasher.update(hash);
                 }
@@ -332,31 +355,39 @@ pub async fn print_chain(blockchain: Arc<Mutex<BlockChain>>) {
     println!("\nCurrent State of Blockchain as Maintained on Client Side:");
     for (i, block) in blockchain_guard.chain.iter().enumerate() {
         match block {
-            Block::NewAccount { address, time, hash } => {
+            Block::NewAccount { address, account_balance, time, hash } => {
                 
                 // Directly use address as it's already a UTF-8 encoded hex string
                 let hash_hex = hex::encode(hash); // Assuming hash is a Vec<u8> needing encoding
                 let address = String::from_utf8(address.clone()).unwrap();
-                println!("\nBlock {}: \n\tNew Account: {}\n\tTime: {}\n\tHash: {}", i, address, time, hash_hex);
+                println!(
+                    "\nBlock {}: \n\tNew Account: {}\n\tAccount Balance: {}\n\tTime: {}\n\tHash: {}", 
+                    i, address, account_balance, time, hash_hex
+                );
             },
-            Block::Transaction { sender, sender_nonce, recipient, amount, time, hash } => {
+            Block::Transaction {sender, sender_balance, recipient, recipient_balance, amount, time, sender_nonce, hash} => {
 
                 // Directly use sender and recipient as they're already UTF-8 encoded hex strings
                 let hash_hex = hex::encode(hash); // Assuming hash is a Vec<u8> needing encoding
                 let sender = String::from_utf8(sender.clone()).unwrap();
                 let recipient = String::from_utf8(recipient.clone()).unwrap();
 
-                println!("\nBlock {}: \n\tSender: {}\n\tSender Nonce: {}\n\tRecipient: {}\n\tAmount: {}\n\tTime: {:}\n\tHash: {}", i, sender, sender_nonce, recipient, amount, time, hash_hex);
+                println!(
+                    "\nBlock {}: \n\tSender: {}\n\tSender Balance: {}\n\tSender Nonce: {}\n\tRecipient: {}\n\tRecipient Balance: {}\n\tAmount: {}\n\tTime: {:}\n\tHash: {}", 
+                    i, sender, sender_balance, sender_nonce, recipient, recipient_balance, amount, time, hash_hex);
             },
             Block::Genesis { time } => {
                 println!("\nBlock {}: \n\tGenesis Block\n\tTime: {:?}", i, time);
             },
-            Block::Faucet { address, time, hash } => {
+            Block::Faucet { address, account_balance, time, hash } => {
                 
                 // Directly use address as it's already a UTF-8 encoded hex string
                 let hash_hex = hex::encode(hash); // Assuming hash is a Vec<u8> needing encoding
                 let address = String::from_utf8(address.clone()).unwrap();
-                println!("\nBlock {}: \n\tFaucet Request: {}\n\tTime: {}\n\tHash: {}", i, address, time, hash_hex);
+                println!(
+                    "\nBlock {}: \n\tFaucet Used By: {}\n\tAccount Balance: {}\n\tTime: {}\n\tHash: {}", 
+                    i, address, account_balance, time, hash_hex
+                );
             },
         }
     }
@@ -369,9 +400,25 @@ pub async fn print_chain(blockchain: Arc<Mutex<BlockChain>>) {
 #[derive(Serialize)]
 #[serde(untagged)]
 enum BlockJson {
-    Genesis { time: u64 },
-    Transaction { sender: String, recipient: String, amount: u64, time: u64, sender_nonce: u64, hash: String, },
-    NewAccount {address: String, time: u64, hash: String, },
+    Genesis { 
+        time: u64 
+    },
+    Transaction {
+         sender: String, 
+         sender_balance: u64, 
+         recipient: String, 
+         recipient_balance: u64,
+         amount: u64, 
+         time: u64, 
+         sender_nonce: u64, 
+         hash: String, 
+        },
+    NewAccount {
+        address: String, 
+        account_balance: u64,
+        time: u64, 
+        hash: String, 
+    },
 }
 
 /**
@@ -382,23 +429,27 @@ pub async fn save_most_recent_block_json(blockchain: Arc<Mutex<BlockChain>>) {
     let blockchain_guard: MutexGuard<'_, BlockChain> = blockchain.lock().await;
 
     if let Some(most_recent_block) = blockchain_guard.chain.last() {
-        let block_json = match most_recent_block {
+        let block_json: BlockJson = match most_recent_block {
             Block::Genesis { time } => BlockJson::Genesis { time: *time },
-            Block::Transaction { sender, recipient, amount, time, sender_nonce, hash } => BlockJson::Transaction {
+            Block::Transaction { sender, sender_balance, recipient, recipient_balance, amount, time, sender_nonce, hash } => BlockJson::Transaction {
                 sender: String::from_utf8(sender.clone()).unwrap_or_default(),
+                sender_balance: *sender_balance,
                 recipient: String::from_utf8(recipient.clone()).unwrap_or_default(),
+                recipient_balance: *recipient_balance,
                 amount: *amount,
                 time: *time,
                 sender_nonce: *sender_nonce,
                 hash: hex::encode(hash),
             },
-            Block::NewAccount { address, time, hash } => BlockJson::NewAccount {
+            Block::NewAccount { address, account_balance, time, hash } => BlockJson::NewAccount {
                 address: String::from_utf8(address.clone()).unwrap_or_default(),
+                account_balance: *account_balance,
                 time: *time,
                 hash: hex::encode(hash),
             },
-            Block::Faucet { address, time, hash } => BlockJson::NewAccount {
+            Block::Faucet { address, account_balance, time, hash } => BlockJson::NewAccount {
                 address: String::from_utf8(address.clone()).unwrap_or_default(),
+                account_balance: *account_balance,
                 time: *time,
                 hash: hex::encode(hash),
             },
@@ -409,8 +460,6 @@ pub async fn save_most_recent_block_json(blockchain: Arc<Mutex<BlockChain>>) {
         eprintln!("Blockchain is empty.");
     }
 }
-
-
 
 /**
  * @test the following tests are used to verify the functionality of the blockchain struct.
@@ -438,19 +487,20 @@ pub async fn save_most_recent_block_json(blockchain: Arc<Mutex<BlockChain>>) {
         // Simulate account creation request
         let new_address = vec![0u8; 20]; // Dummy address for testing
         let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-        let request = Request::NewAccount {
-            new_address: new_address.clone(),
+        let request = NewBlock::NewAccount {
+            address: new_address.clone(),
+            account_balance: 0,
             time,
         };
 
         // Assume validation is successful and directly push the request to the chain
-        blockchain.push_request_to_chain(request);
+        blockchain.push_block_to_chain(request);
 
         // Verify that a new NewAccount block has been added
         assert_eq!(blockchain.chain.len(), 2, "Blockchain should have 2 blocks after account creation");
 
         match &blockchain.chain[1] {
-            Block::NewAccount { address, time: _, hash: _ } => {
+            Block::NewAccount { address, account_balance, time: _, hash: _ } => {
                 assert_eq!(&address[..], &new_address[..], "The new account address should match the request");
             },
             _ => panic!("Second block should be an Account Creation block"),

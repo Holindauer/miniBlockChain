@@ -5,7 +5,7 @@ use std::time::UNIX_EPOCH;
 use std::collections::HashMap;
 
 use crate::blockchain;
-use crate::blockchain::{BlockChain, Request};
+use crate::blockchain::{BlockChain, NewBlock};
 use crate::merkle_tree::{MerkleTree, Account};
 use crate::constants::{FAUCET_AMOUNT, HEARTBEAT_TIMEOUT};
 use crate::consensus;
@@ -262,7 +262,10 @@ async fn add_account_creation_to_ledger( request: Value, validator_node: Validat
     let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
     // Package request details in Request enum 
-    let new_account_request = blockchain::Request::NewAccount { new_address: public_key, time: time, };
+    let new_account_request = NewBlock::NewAccount { 
+        address: public_key, 
+        account_balance: 0,
+        time: time, };
 
     // Lock blockchain for writing
     let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();    
@@ -270,7 +273,7 @@ async fn add_account_creation_to_ledger( request: Value, validator_node: Validat
 
     // Write the  acount creation in the blockchain
     blockchain_guard.store_incoming_requests(&new_account_request);
-    blockchain_guard.push_request_to_chain(new_account_request);   
+    blockchain_guard.push_block_to_chain(new_account_request);   
 
 }
 
@@ -405,8 +408,14 @@ async fn add_transaction_to_ledger(request: Value, validator_node: ValidatorNode
     merkle_tree_guard.change_balance(recipient_address.clone(), recipient_balance);
     
     // Package request details in Request enum 
-    let new_account_request = blockchain::Request::Transaction {  // TODO this could probably just be replaced by the request object
-        sender_address, sender_nonce, recipient_address, amount, time, 
+    let new_account_request = NewBlock::Transaction {  // TODO this could probably be replaced by the block struct itself
+        sender_address,  
+        sender_balance,
+        sender_nonce, 
+        recipient_address, 
+        recipient_balance,
+        amount, 
+        time, 
     };
 
     // Retrieve and lock the blockchain
@@ -415,7 +424,7 @@ async fn add_transaction_to_ledger(request: Value, validator_node: ValidatorNode
 
     // Write a new block to the blockchain
     blockchain_guard.store_incoming_requests(&new_account_request);
-    blockchain_guard.push_request_to_chain(new_account_request);   
+    blockchain_guard.push_block_to_chain(new_account_request);   
 
 }
 
@@ -515,7 +524,10 @@ async fn add_faucet_request_to_ledger(request: Value, validator_node: ValidatorN
 
     // Update the blockchain with the faucet request
     let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-    let new_account_request: Request = Request::Faucet { address: public_key, time: time, };
+    let new_account_request = NewBlock::Faucet { 
+        address: public_key, 
+        account_balance: new_balance,
+        time: time, };
     
     // Lock blockchain for writing
     let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();
@@ -523,7 +535,7 @@ async fn add_faucet_request_to_ledger(request: Value, validator_node: ValidatorN
 
     // store and validate the request
     blockchain_guard.store_incoming_requests(&new_account_request);
-    blockchain_guard.push_request_to_chain(new_account_request);
+    blockchain_guard.push_block_to_chain(new_account_request);
 }
 
 
