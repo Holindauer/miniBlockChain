@@ -1,8 +1,7 @@
 use sha2::{Sha256, Digest};
-use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::{HashMap, VecDeque};
-use std::{fs::File, io::{self, Read}, path::Path};
+use std::fs::File;
 use serde::{Serialize, Deserialize};
 use tokio::sync::{Mutex, MutexGuard};
 use std::sync::Arc;
@@ -119,10 +118,10 @@ impl BlockChain {
      * @dev the sender's address is pushed to the pending_transactions_queue and the transaction is
      * added to the joint_transactions_map, using the sender's address as the key.
      */
-    pub fn store_incoming_requests(&mut self, newBlockRequest: &Block) {
+    pub fn store_incoming_requests(&mut self, new_block_request: &Block) {
 
         // Retrieve and clone relavant address from the request
-        let address: Vec<u8> = match &newBlockRequest {
+        let address: Vec<u8> = match &new_block_request {
             Block::Transaction { sender, .. } => sender,
             Block::NewAccount { address, .. } => address,
             Block::Faucet { address, .. } => address,
@@ -135,7 +134,7 @@ impl BlockChain {
         // Insert the request into the joint_request_map, creating a new entry if necessary
         self.joint_request_map.entry(address)
             .or_insert_with(Vec::new)
-            .push(newBlockRequest.clone());
+            .push(new_block_request.clone());
     }
 
    // Method to create a new block from a request and add it to the blockchain
@@ -327,22 +326,6 @@ pub async fn print_chain(blockchain: Arc<Mutex<BlockChain>>) {
     }
 }
 
-
-
-/**
- * @notice save_most_recent_block_json() is an asynchronous function that saves the most recent block in the
- * blockchain as a JSON file. This function is used to save the most recent block during integration testing.
- */
-pub async fn save_most_recent_block_json(blockchain: Arc<Mutex<BlockChain>>) {
-
-    // lock and copy the blockchain
-    let blockchain_guard: MutexGuard<'_, BlockChain> = blockchain.lock().await;
-    let blockchain_copy: BlockChain = blockchain_guard.clone();
-
-    // save the blockchain to a JSON file
-    let message_json = serde_json::to_string(&blockchain_copy).unwrap();
-    std::fs::write("most_recent_block.json", message_json).unwrap();
-}
 
 /**
  * @test the following tests are used to verify the functionality of the blockchain struct.

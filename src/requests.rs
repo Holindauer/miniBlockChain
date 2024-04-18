@@ -47,6 +47,9 @@ use crate::validation::ValidatorNode;
     },
     HeartBeat{
         port_address: String,
+    },
+    PeerLedgerRequest{
+        response_port: String,
     }
  }
 
@@ -66,7 +69,7 @@ struct NewAccountDetailsTestOutput {
  * obfuscated private key hash, and sends the account creation request to the network as a json object.
  */
 pub async fn send_account_creation_request(){
-    println!("request::send_account_creation_request()...");
+    println!("Sending Account Creation Request...");
 
     // Generate a new keypair
     let (secret_key, public_key) = zk_proof::generate_keypair().unwrap();
@@ -99,7 +102,7 @@ pub async fn send_account_creation_request(){
  *      elliptic curve. The points are base64 encoded and sent to the network along w/ other transaction details.
  */
 pub async fn send_transaction_request(sender_private_key: String, recipient_public_key: String, amount: String ) {
-    println!("requests::send_transaction_request()...");
+    println!("Sending Transaction Request...");
 
     // derive the public key from the private key
     let sender_public_key: String = zk_proof::derive_public_key_from_private_key(&sender_private_key);
@@ -129,7 +132,7 @@ pub async fn send_transaction_request(sender_private_key: String, recipient_publ
  * @notice send_faucet_request() sends a request to the network to provide a given public key with a small amount of tokens
  */
 pub async fn send_faucet_request(public_key: String)  {
-    println!("request::send_faucet_request()...");
+    println!("Sending Faucet Request...");
 
     // Package the message for network transmission
     let request = NetworkRequest::Faucet { public_key: public_key.to_string(), };
@@ -147,10 +150,10 @@ pub async fn send_faucet_request(public_key: String)  {
  * the majority decision of the network.
 */
 pub async fn send_consensus_request( request: Value, validator_node: ValidatorNode )  {
-    println!("requests::send_block_consensus_request()...");
+    println!("Sending request to peers for their independent decisions...");
 
     // extract the port number form the validator node
-    let self_port: String = validator_node.client_port_address.clone();
+    let client_port: String = validator_node.client_port_address.clone();
 
     // get hash of request recieved by client, (used as key)
     let client_request_hash: Vec<u8> = network::hash_network_request(request.clone()).await;
@@ -158,7 +161,7 @@ pub async fn send_consensus_request( request: Value, validator_node: ValidatorNo
     // Package peer request in struct and serialize to JSON
     let consensus_request = NetworkRequest::ConsensusRequest {
         request_hash: client_request_hash.clone(),
-        response_port: self_port.clone()
+        response_port: client_port.clone()
     };
 
     // Serialize request to JSON
@@ -170,12 +173,34 @@ pub async fn send_consensus_request( request: Value, validator_node: ValidatorNo
 
 
 /**
+ * @notice send_peer_ledger_request() sends a request to all currently 
+ * active nodes for a copy of their local ledger state.
+ */
+pub async fn send_peer_ledger_request(validator_node: ValidatorNode){
+
+    // get client port form validator node
+    let client_port: String = validator_node.client_port_address.clone();
+
+    // Package peer request in struct and serialize to JSON
+    let peer_ledger_request = NetworkRequest::PeerLedgerRequest {
+        response_port: client_port.clone()
+    }; 
+
+    // Serialize request to JSON
+    let request_json: String = serde_json::to_string(&peer_ledger_request).unwrap();
+
+    // Send request to all outbound ports
+    send_json_request_to_other_nodes(request_json, validator_node.clone()).await;
+}
+
+
+/**
  * @notice send_heartbeat() is an asynchronous process that is blocked by start_listening() after the succesfull connection of a listener 
  * to the network. A heartbeat signal is sent every constants::HEARTBEAT_PERIOD seconds to the network to indicate that the node is still 
  * active and responces should be expected from the port_address in the HeartBeat msg folllowing a consensus request. 
  */
 pub async fn send_heartbeat_request(validator_node: ValidatorNode) {
-    println!("\nrequests::send_heartbeat()...");
+    println!("\nSending HeartBeat...");
 
     // get client port and outbound ports
     let client_port: String = validator_node.client_port_address.clone();
@@ -212,7 +237,7 @@ async fn send_json_request_to_all_ports(request_json: String) {
  * @notice send_json_request() sends a json request to all accepted ports on 
  * the network that are not the client port stored in the validator node
  */
-async fn send_json_request_to_other_nodes(request_json: String, validator_node: ValidatorNode) {
+pub async fn send_json_request_to_other_nodes(request_json: String, validator_node: ValidatorNode) {
 
     // Retrieve the client port address
     let client_port: String = validator_node.client_port_address.clone();

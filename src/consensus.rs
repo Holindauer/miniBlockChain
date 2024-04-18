@@ -55,7 +55,7 @@ use crate::network;
 
  #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BlockConsensusResponse {
-    action: String,
+    action: String,     
     request_hash: Vec<u8>,
     decision: bool,
 }
@@ -66,7 +66,7 @@ struct BlockConsensusResponse {
  * This function will retrieve the client decision from the request, package the response, and send the response back to the requesting node.
  * The funnction is called within the validator module.
  */
-pub async fn handle_consensus_request(request: Value, validator_node: validation::ValidatorNode) {
+pub async fn handle_consensus_request(request: Value, validator_node: validation::ValidatorNode) -> Result<(), Box<dyn std::error::Error>> {
     println!("Handling request from peer for consensus..."); 
 
     // retrieve request hash from request as a vector of u8
@@ -100,7 +100,7 @@ pub async fn handle_consensus_request(request: Value, validator_node: validation
             // Write to the Stream
             if let Err(e) = stream.write_all(json_msg.as_bytes()).await { 
                 eprintln!("Failed to send message to {}: {}", response_port, e); 
-                return;
+                return Ok(());
             }
             println!("Sent repsonse to conensus request to: {}", response_port); 
          },
@@ -108,9 +108,11 @@ pub async fn handle_consensus_request(request: Value, validator_node: validation
         // Print error message if connection fails
         Err(_) => { println!("Failed to connect to {}, There may not be a listener...", response_port); }
     }
+
+    Ok(())
 }   
 
-pub async fn handle_consensus_response(request: Value, validator_node: validation::ValidatorNode) {
+pub async fn handle_consensus_response(request: Value, validator_node: validation::ValidatorNode) -> Result<(), Box<dyn std::error::Error>> { 
     println!("Handling consensus request reponse from peer..."); 
 
     // get request hash from request
@@ -144,7 +146,7 @@ pub async fn handle_consensus_response(request: Value, validator_node: validatio
     notify.notify_one();
 
     println!("Current peer votes to accept transaction: {}, votes to reject: {}", true_count, false_count);
-
+    Ok(())
 }
 
 

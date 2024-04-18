@@ -1,10 +1,6 @@
 use sha2::{Sha256, Digest};
-use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{Read, Write};
-use hex;
-use curve25519_dalek::ristretto::{RistrettoPoint, CompressedRistretto};
+use serde::{Serialize, Deserialize};
 
 /**
  * @notice merkleTree.rs contains an implementation of a merkle tree for the purpose of retrieval of 
@@ -30,7 +26,7 @@ use curve25519_dalek::ristretto::{RistrettoPoint, CompressedRistretto};
  * by provding two numbers that sum to the private key private key, that when added together as elliptic curve points add 
  * to the obfuscated public key.
  */
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
     pub public_key: Vec<u8>,
     pub obfuscated_private_key_hash: Vec<u8>,
@@ -41,7 +37,7 @@ pub struct Account {
 /**
  * @notice the MerkleNode enum represents a single node leaf/branch in the merkle tree. 
  */
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MerkleNode {
     Leaf { hash: Vec<u8> },
     Branch { hash: Vec<u8>, left: Box<MerkleNode>, right: Box<MerkleNode> },
@@ -54,11 +50,11 @@ pub enum MerkleNode {
  * @param accounts - a vector of all accounts in the blockchain. Stored in Account structs.
  * @param accountsMap - a hash map of account balances indexed by public key.
  */
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MerkleTree {
-    root: Option<MerkleNode>,
-    accounts_vec: Vec<Account>,
-    accounts_map: HashMap<Vec<u8>, u64>,
+    pub root: Option<MerkleNode>,
+    pub accounts_vec: Vec<Account>,
+    pub accounts_map: HashMap<Vec<u8>, u64>,
 }
 
 impl MerkleTree {
@@ -81,11 +77,6 @@ impl MerkleTree {
     // Retrieves account balance from accountsMap public key
     pub fn get_account_balance(&self, public_key: Vec<u8>) -> Option<u64> {
         self.accounts_map.get(&public_key).cloned()
-    }
-
-    // Returns Account struct of a specific public key
-    pub fn get_account(&self, public_key: Vec<u8>) -> Option<Account> {
-        self.accounts_vec.iter().find(|account| account.public_key == public_key).cloned()
     }
 
     // Returns an accounts private key hash
@@ -178,84 +169,6 @@ impl MerkleTree {
     // Helper function to extract hash from either type of MerkleNode
     fn extract_hash(node: &MerkleNode) -> &[u8] {
         match node { MerkleNode::Leaf { hash } | MerkleNode::Branch { hash, .. } => hash, }
-    }
-
-    // Method to save the Merkle tree to a JSON file
-    pub fn save_to_json(&self) -> std::io::Result<()> {
-
-        // get merkle root hash 
-        let final_hash = match &self.root {
-            Some(MerkleNode::Branch { hash, .. }) => hash.clone(),
-            Some(MerkleNode::Leaf { hash }) => hash.clone(),
-            None => vec![0; 32],
-        };
-
-        // Convert the accountsVec to a JSON array
-        let accounts_json: Vec<serde_json::Value> = self.accounts_vec.iter()
-            .map(|account| {
-                json!({
-                    "public_key": hex::encode(&account.public_key),
-                    "obfuscated_private_key": hex::encode(&account.obfuscated_private_key_hash),
-                    "balance": account.balance,
-                    "nonce": account.nonce,
-                })
-            })
-            .collect();
-
-        // Create a JSON object with the final hash and accounts
-        let merkle_tree_json = json!({
-            "final_hash": final_hash,
-            "accounts": accounts_json
-        });
-
-        // Serialize the JSON object and write it to a file
-        let serialized = serde_json::to_string_pretty(&merkle_tree_json).expect("Failed to serialize Merkle tree");
-        let mut file = File::create("merkleTree.json")?;
-        file.write_all(serialized.as_bytes())?;
-
-        Ok(())
-    }
-
-    // Method to load the Merkle tree from a JSON file
-    pub fn load_from_json(&mut self) -> std::io::Result<()> {
-
-        // Read the contents of the JSON file
-        let mut file = File::open("merkleTree.json")?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-
-        // Parse the JSON string
-        let parsed: Value = serde_json::from_str(&contents)?;
-
-        // Clear existing data
-        self.clear();
-
-        // Extract the final hash and accounts from the JSON object, populating the Merkle tree
-        let final_hash = hex::decode(parsed["final_hash"].as_str().unwrap()).unwrap();  // TODO potentially check if this matches the root hash when computed from loaded accounts
-        let accounts_json = parsed["accounts"].as_array().unwrap();
-
-        // Set the root node to the final hash
-        for account in accounts_json {
-
-            // Extract account details from the JSON object
-            let public_key: Vec<u8> = hex::decode(account["public_key"].as_str().unwrap()).unwrap();
-            let balance: u64 = account["balance"].as_u64().unwrap();
-            let nonce: u64 = account["nonce"].as_u64().unwrap();
-
-            // Inside your deserialization loop for accounts
-            let obfuscated_private_key_hash: Vec<u8> = hex::decode(account["obfuscated_private_key"].as_str().unwrap()).unwrap();
-
-            // Add the account to the Merkle tree
-            self.insert_account(Account { public_key, balance, nonce, obfuscated_private_key_hash });
-        }
-
-        Ok(())
-    }
-
-    // Helper to clear the Merkle tree 
-    fn clear(&mut self) {
-        self.root = None;
-        self.accounts_vec.clear();
     }
 }
 

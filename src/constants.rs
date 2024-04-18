@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 // durations to wait before sending for consensus
-pub const DURATION_GET_PEER_CHAINS: Duration = Duration::from_secs(1);  
+pub const PEER_STATE_RECEPTION_DURATION: Duration = Duration::from_secs(2);  
 
 // Heartbeat durations
 pub const HEARTBEAT_PERIOD: Duration = Duration::from_secs(5);

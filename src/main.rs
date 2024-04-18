@@ -3,7 +3,7 @@ mod validation;
 mod merkle_tree;
 mod zk_proof;
 mod constants;
-mod chain_consensus;
+mod adopt_network_state;
 mod consensus;
 mod network;
 mod requests;

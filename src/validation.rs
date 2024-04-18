@@ -11,6 +11,8 @@ use crate::consensus;
 use crate::zk_proof;
 use crate::network;
 use crate::requests;
+use crate::adopt_network_state;
+use crate::adopt_network_state::PeerLedgerResponse;
 
 /**
  * @protocol validation.rs contains the data structures and event handler logic for running a validator node. 
@@ -65,6 +67,11 @@ use crate::requests;
  * when the active_peers datastructure is updated. It is used to determine when all responses have been recieved
  * for a given request.
  * 
+ * @param peer_ledger_states: Arc<Vec<PeerLedgerResponse>> - A vector of PeerLedgerResponse structs that contain
+ * the blockchain and merkle tree state of each peer on the network. This datastructure is used to store the state
+ * of peer nodes and determine the majority state of the network when updating the local ledger state of the 
+ * validator node.
+ * 
  * @param notify: Arc<Notify> - A tokio sync Notify struct that is used to notify the validator node when all
  * responses have been recieved for a given request. This is used to break out of the loop that waits for responses
  * from the network.
@@ -82,6 +89,7 @@ pub struct ValidatorNode {
     pub client_port_address: String,    
     pub active_peers: Arc<Mutex<Vec<(String, u64)>>>, 
     pub total_peers: Arc<Mutex<usize>>, 
+    pub peer_ledger_states: Arc<Mutex<Vec<PeerLedgerResponse>>>,
     pub notify: Arc<Notify>, 
 }
 
@@ -94,7 +102,8 @@ impl ValidatorNode { // initializes datastructures
             client_decisions: Arc::new(Mutex::new(HashMap::new())),
             client_port_address: String::new(),
             active_peers: Arc::new(Mutex::new(Vec::new())),
-            total_peers: Arc::new(Mutex::new(0)), // Init to zero, will be set when peers are known
+            total_peers: Arc::new(Mutex::new(0)), // Init to zero, will be set when peers are know
+            peer_ledger_states: Arc::new(Mutex::new(Vec::new())),
             notify: Arc::new(Notify::new()),
         }
     }
@@ -133,9 +142,8 @@ impl ValidatorNode { // initializes datastructures
         // if there are no active peers, return 
         if total_peers == 0 { return; }
         
+        // notify the validator node that all responses have been recieved
         while !self.check_all_responses_received(request_hash).await {
-
-            // notify the validator node that all responses have been recieved
             self.notify.notified().await;
         }
 
@@ -157,10 +165,7 @@ pub async fn run_validation(private_key: &String) {
 
     // init validator node struct w/ empty blockchain and merkle tree
     let validator_node: ValidatorNode = ValidatorNode::new();
-
-    // send request to peers to update to network majority blockchain state.    // TODO focus on this component once new block consensns is implemented
-    // chain_consensus::update_local_blockchain(validator_node.clone()).await;  // TODO modify this to also update the merkle tree at bootup
-
+    
     // listen for and process incoming request
     network::start_listening(validator_node.clone()).await;
 } 
@@ -437,14 +442,14 @@ async fn add_transaction_to_ledger(request: Value, validator_node: ValidatorNode
  * This results in an account balance increase of FAUCET_AMOUNT for the provided public key. This function is called by 
  * handle_incoming_message() when a new faucet request is received.
  */
-pub async fn handle_faucet_request(request: Value, validator_node: ValidatorNode) {
+pub async fn handle_faucet_request(request: Value, validator_node: ValidatorNode)  -> Result<(), Box<dyn std::error::Error>> {
     println!("Handling request to use faucet...");
 
     // verify the faucet request independently
     if verify_faucet_request_independently(
         request.clone(), validator_node.clone()
 
-    ).await != true {  return; }
+    ).await != true {  return Ok(()); }
 
     // Prepare for responses (updating the count of active peers)
     validator_node.prepare_for_responses().await;
@@ -463,10 +468,12 @@ pub async fn handle_faucet_request(request: Value, validator_node: ValidatorNode
     ).await;
 
     // return error if network consensus not reached
-    if (peer_majority_decision == false) { return; }
+    if (peer_majority_decision == false) { return Ok(()); }
 
     // add the faucet request to the ledger
     add_faucet_request_to_ledger(request.clone(), validator_node.clone()).await;
+
+    Ok(())
 }
 
 /**
@@ -590,14 +597,3 @@ pub async fn handle_heartbeat(request: Value, validator_node: ValidatorNode) -> 
     Ok(())
 }
 
-// ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // Helper/Integration Testing Functions
-/**
- * @noticd save_failed_transaction_json() is an async function that saves the most recent failed transaction as a
- * JSON file. This function is used to save the most recent failed transaction during integration testing.
- */
-pub async fn save_failed_transaction_json(){
-
-    // save a simple json file that just contains the number 1 for failed transaction
-    let message_json = serde_json::to_string(&1).unwrap();
-    std::fs::write("failed_transaction.json", message_json).unwrap();
-}
