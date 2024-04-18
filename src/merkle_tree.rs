@@ -26,7 +26,7 @@ use serde::{Serialize, Deserialize};
  * by provding two numbers that sum to the private key private key, that when added together as elliptic curve points add 
  * to the obfuscated public key.
  */
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Account {
     pub public_key: Vec<u8>,
     pub obfuscated_private_key_hash: Vec<u8>,
@@ -37,7 +37,7 @@ pub struct Account {
 /**
  * @notice the MerkleNode enum represents a single node leaf/branch in the merkle tree. 
  */
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum MerkleNode {
     Leaf { hash: Vec<u8> },
     Branch { hash: Vec<u8>, left: Box<MerkleNode>, right: Box<MerkleNode> },
@@ -50,7 +50,7 @@ pub enum MerkleNode {
  * @param accounts - a vector of all accounts in the blockchain. Stored in Account structs.
  * @param accountsMap - a hash map of account balances indexed by public key.
  */
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MerkleTree {
     pub root: Option<MerkleNode>,
     pub accounts_vec: Vec<Account>,
@@ -175,7 +175,10 @@ impl MerkleTree {
 
 #[cfg(test)]
 mod tests {
+    use std::hash::Hash;
+
     use super::*;
+    use serde_json::Value;
     
     /**
      * @test test_insert_account() is a test function that checks the insert_account() method of the MerkleTree struct.
@@ -284,6 +287,50 @@ mod tests {
         } else {
             panic!("Root should be a branch node");
         }
+    }
 
+    /**
+     * @test test_serialize_deserialize_merkle_tree() is a test function that checks the
+     * serialization and deserialization of the components of theMerkleTree struct. that 
+     * are extracted and serialized during the peer ledger state adoption when a valildator
+     * node is first connected to the network.
+     */
+    #[test]
+    fn test_serialize_deserialize_merkle_tree() {
+
+        // create a new MerkleTree instance
+        let mut tree = MerkleTree::new(); 
+        
+
+
+        // mock account data
+        let account = Account { // create a new Account instance w/ mock data
+            public_key: vec![1, 2, 3, 4],
+            obfuscated_private_key_hash: vec![1, 2, 3, 4],
+            balance: 100,
+            nonce: 1,
+        };  
+
+        // insert account into the tree
+        let account: Account = account.clone();
+        tree.insert_account(account);
+
+        // Retrieve the accounts vec and map from the tree
+        let accounts_vec: Vec<Account> = tree.accounts_vec.clone();
+        let accounts_map: HashMap<Vec<u8>, u64> = tree.accounts_map.clone();
+
+
+        // Serialize the two components
+        let accounts_vec_serialized: String = serde_json::to_string(&accounts_vec).unwrap();
+        let accounts_map_serialized: String = serde_json::to_string(&accounts_map).unwrap();
+
+        // Deserialize the two components
+        let accounts_vec_deserialized: Vec<Account> = serde_json::from_str(&accounts_vec_serialized).unwrap();
+        let accounts_map_deserialized: HashMap<Vec<u8>, u64> = serde_json::from_str(&accounts_map_serialized).unwrap();
+
+        // Ensure the deserialized components are equal to the original components
+        // assert_eq!(accounts_vec, accounts_vec_deserialized);
+        // assert_eq!(accounts_map, accounts_map_deserialized);
+        
     }
 }

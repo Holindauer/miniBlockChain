@@ -152,6 +152,7 @@ async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode )
 
     // After parsing to JSON determine what to do with the msg based on the action field
     if let Ok(request) = serde_json::from_str::<Value>(&msg) {
+        
         let request_action: Option<&str> = request["action"].as_str();     
         
         // Determine the action to take based on the request

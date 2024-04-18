@@ -1,12 +1,15 @@
 use std::sync::Arc;
-use std::collections::HashMap;
 use tokio::sync::{Mutex, Notify};
 use tokio::net::TcpStream;
 use tokio::io::AsyncWriteExt;
-use serde::{Serialize, Deserialize};
 use sha2::{Digest, Sha256};
 
-use serde_json::Value;
+use serde::{Serializer, Deserializer, Deserialize, Serialize};
+use serde::de::{self, Visitor};
+use base64::{encode, decode};
+use std::{fmt, collections::HashMap};
+
+use serde_json::{Result as JsonResult, Value};
 
 use crate::validation::ValidatorNode;
 use crate::blockchain::{BlockChain, Block};
@@ -17,15 +20,6 @@ use crate::constants::PEER_STATE_RECEPTION_DURATION;
 
 
 
-
-/**
- * 
-
-Secret Key: "669815890583d2be695c2b5de3fd57cf0d69ba31ade6fe91000628348a19eebb"
-Public Key: "02e83d256e1cb8b999207261defc66f912740952b164de44b6cf4557cdb3af0571"
- */
-
-
 /**
  * @notice chain_consensus.rs contains the logic for updating the local blockchain and merkle tree of a validator node
  * that is booting up to the majority state of the network. This is done by sending a request to all other validators
@@ -33,13 +27,79 @@ Public Key: "02e83d256e1cb8b999207261defc66f912740952b164de44b6cf4557cdb3af0571"
  * its local blockchain to reflect the majority.
 */
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PeerLedgerResponse {
     action: String,
     blockchain: Vec<Block>,
     accounts_vec: Vec<Account>,
+    #[serde(serialize_with = "serialize_map", deserialize_with = "deserialize_map")]
     accounts_map: HashMap<Vec<u8>, u64>,
 }
+
+/**
+ * @notice The PeerLedgerResponse struct is a serializable struct that is used to package the blockchain and merkle tree
+ * data of a validator node. This struct is used to send the blockchain and merkle tree data to other validators when
+ * they request it. The struct is also used to store the blockchain and merkle tree data of other validators when they
+ * send it to this validator node.
+ */
+fn serialize_map<S>(map: &HashMap<Vec<u8>, u64>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{   
+    // Encode the keys of the map to base64 before serialization
+    let map: HashMap<String, u64> = map
+        .iter()
+        .map(|(k, v)| (encode(k), *v))
+        .collect();
+    map.serialize(serializer)
+}
+
+/**
+ * @notice The serialize_map() function is a custom serialization function that serializes the accounts_map field of the
+ * PeerLedgerResponse struct. The accounts_map field is a HashMap with keys of type Vec<u8> and values of type u64. The
+ * keys are base64 encoded before serialization to JSON to ensure that the keys are valid JSON strings.
+ */
+fn deserialize_map<'de, D>(deserializer: D) -> Result<HashMap<Vec<u8>, u64>, D::Error>
+where
+    D: Deserializer<'de>,
+{   
+    struct BytesMapVisitor;
+
+    impl<'de> Visitor<'de> for BytesMapVisitor {
+        type Value = HashMap<Vec<u8>, u64>;
+        
+        // Define the error type for the visitor
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a map of base64 strings to u64 integers")
+        }
+        
+        // Deserialize the map
+        fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+        where
+            M: de::MapAccess<'de>,
+        {   
+            // Create a new HashMap to store the deserialized map
+            let mut map: HashMap<Vec<u8>, u64> = HashMap::new();
+            while let Some((key, value)) = access.next_entry::<String, u64>()? {
+                map.insert(decode(&key).map_err(de::Error::custom)?, value);
+            }
+            Ok(map)
+        }
+    }
+
+    deserializer.deserialize_map(BytesMapVisitor)
+}
+
+// Function to serialize PeerLedgerResponse to a JSON string
+pub fn serialize_peer_ledger_response(response: &PeerLedgerResponse) -> JsonResult<String> {
+    serde_json::to_string(&response)
+}
+
+// Function to deserialize JSON string back to a PeerLedgerResponse
+pub fn deserialize_peer_ledger_response(json_data: &str) -> JsonResult<PeerLedgerResponse> {
+    serde_json::from_str(json_data)
+}
+
 
 /**
  * @notice adopt_network_state() is an asynchronous function that fascililtates the process of updating 
@@ -88,7 +148,7 @@ pub async fn adopt_network_state(validator_node: ValidatorNode) {
     };
 
     // serialize the PeerLedgerResponse struct into a JSON string
-    let ledger_json: String = serde_json::to_string(&response)?;
+    let ledger_json: String = serialize_peer_ledger_response(&response).unwrap();
 
     // Retrieve response port from request
     let response_port: String = request["response_port"].as_str().unwrap().to_string();
@@ -122,35 +182,8 @@ pub async fn adopt_network_state(validator_node: ValidatorNode) {
   */
  pub async fn handle_peer_ledger_response(response: Value, validator_node: ValidatorNode)-> Result<(), Box<dyn std::error::Error>> {
 
-    // Extract the blockchain data from the response
-    let blockchain: Vec<Block> = response["blockchain"].as_array().unwrap()
-        .iter()
-        .map(|block| serde_json::from_value(block.clone()).unwrap())
-        .collect();
-
-    // Extract the accounts_vec data from the response
-    let accounts_vec: Vec<Account> = response["accounts_vec"].as_array().unwrap()
-        .iter()
-        .map(|account| serde_json::from_value(account.clone()).unwrap())
-        .collect();
-
-    // Extract the accounts_map data from the response
-    let accounts_map: HashMap<Vec<u8>, u64> = response["accounts_map"].as_object().unwrap()
-        .iter()
-        .map(|(key, value)| {
-            let key_vec: Vec<u8> = key.as_bytes().to_vec();
-            let value_u64: u64 = value.as_u64().unwrap();
-            (key_vec, value_u64)
-        })
-        .collect();
-        
-    // Package the data into a PeerLedgerResponse struct
-    let peer_ledger_response: PeerLedgerResponse = PeerLedgerResponse {
-        action: "PeerLedgerResponse".to_string(),
-        blockchain: blockchain,
-        accounts_vec: accounts_vec,
-        accounts_map: accounts_map,
-    };
+    // Deserialize the JSON string into a PeerLedgerResponse struct
+    let peer_ledger_response: PeerLedgerResponse = deserialize_peer_ledger_response(&response.to_string()).unwrap();
 
     // Lock the peer_ledger_state mutex
     let peer_ledger_state: Arc<Mutex<Vec<PeerLedgerResponse>>> = validator_node.peer_ledger_states.clone();
@@ -176,64 +209,69 @@ pub async fn adopt_network_state(validator_node: ValidatorNode) {
     * and counting the number of occurences of each hash using a hash map. The hash with the most occurences is considered 
     the majority state.
   */
-async fn adopt_majority(validator_node: ValidatorNode){
+  async fn adopt_majority(validator_node: ValidatorNode){
 
     // Lock the peer_ledger_states mutex
     let peer_ledger_states: Arc<Mutex<Vec<PeerLedgerResponse>>> = validator_node.peer_ledger_states.clone();
     let peer_ledger_states_guard = peer_ledger_states.lock().await;
 
-    // Return if there are no peer_ledger_states (first node of the network)
-    if peer_ledger_states_guard.len() == 0 { 
-        println!("No peer ledger states to adopt...");  return; 
+    // If there are no peer_ledger_states to adopt, return
+    if peer_ledger_states_guard.is_empty() { 
+        println!("No peer ledger states to adopt..."); 
+        return; 
     }
 
-    // Create a hash map to store the hash of each peer_ledger_state
+    // Create a hash map to store the hashes of the blockchain and merkle tree data of each peer_ledger_state
     let mut ledger_hash_map: HashMap<Vec<u8>, u32> = HashMap::new();
 
     // Iterate through each peer_ledger_state and hash the blockchain and merkle tree data
     for peer_ledger_state in peer_ledger_states_guard.iter() {
+
         let mut hasher = Sha256::new();
+        
         hasher.update(serde_json::to_string(&peer_ledger_state.blockchain).unwrap());
         hasher.update(serde_json::to_string(&peer_ledger_state.accounts_vec).unwrap());
-        hasher.update(serde_json::to_string(&peer_ledger_state.accounts_map).unwrap());
+
+        // Serialize accounts_map with base64 encoding for keys
+        hasher.update(serde_json::to_string(&serialize_accounts_map(&peer_ledger_state.accounts_map)).unwrap());
+
+        // Finalize the hash 
         let hash: Vec<u8> = hasher.finalize().to_vec();
 
-        // Count the number of occurences of each hash
+        // store the hash in the ledger_hash_map
         let count = ledger_hash_map.entry(hash).or_insert(0);
         *count += 1;
     }
 
-    // Find the hash with the most occurences
-    let mut majority_hash: Vec<u8> = Vec::new();
-    let mut majority_count: u32 = 0;
-    for (hash, count) in ledger_hash_map.iter() {
-        if *count > majority_count {
-            majority_hash = hash.clone();
-            majority_count = *count;
-        }
-    }
+    // Find the hash with the most occurences in the ledger_hash_map
+    let (majority_hash, majority_count) = ledger_hash_map.iter()
+        .max_by_key(|entry| entry.1)
+        .map(|(hash, count)| (hash.clone(), *count))
+        .unwrap();  // Assuming there will be at least one entry
 
-    // Find the peer_ledger_state that corresponds to the majority hash
-    let majority_peer_ledger_state: &PeerLedgerResponse = peer_ledger_states_guard.iter()
-        .find(|peer_ledger_state| {
-            let mut hasher = Sha256::new();
-            hasher.update(serde_json::to_string(&peer_ledger_state.blockchain).unwrap());
-            hasher.update(serde_json::to_string(&peer_ledger_state.accounts_vec).unwrap());
-            hasher.update(serde_json::to_string(&peer_ledger_state.accounts_map).unwrap());
-            let hash: Vec<u8> = hasher.finalize().to_vec();
-            hash == majority_hash
+    // Print the majority hash and count
+    let majority_peer_ledger_state = ledger_hash_map.iter()
+        .max_by_key(|entry| entry.1)
+        .and_then(|(hash, _)| {
+            peer_ledger_states_guard.iter()
+                .find(|state| {
+                    let mut hasher = Sha256::new();
+                    hasher.update(serde_json::to_string(&state.blockchain).unwrap());
+                    hasher.update(serde_json::to_string(&state.accounts_vec).unwrap());
+                    hasher.update(serde_json::to_string(&serialize_accounts_map(&state.accounts_map)).unwrap());
+                    hasher.finalize().to_vec() == *hash
+                })
         })
-        .unwrap();
+        .unwrap_or_else(|| {
+            // Default to the first state if no majority is found (ie no consensus)
+            peer_ledger_states_guard.first().expect("There must be at least one state")
+        });
 
-    // lock blockchain
-    let blockchain: Arc<Mutex<BlockChain>> = validator_node.blockchain.clone();
-    let mut blockchain_guard = blockchain.lock().await;
+    // lock the blockchain and merkle tree
+    let mut blockchain_guard = validator_node.blockchain.lock().await;
+    let mut merkle_tree_guard = validator_node.merkle_tree.lock().await;
 
-    // lock merkle tree
-    let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
-    let mut merkle_tree_guard = merkle_tree.lock().await;
-
-    // Update local ledger to majority state
+    // Update the local blockchain and merkle tree to reflect the majority state
     blockchain_guard.chain = majority_peer_ledger_state.blockchain.clone();
     merkle_tree_guard.accounts_vec = majority_peer_ledger_state.accounts_vec.clone();
     merkle_tree_guard.accounts_map = majority_peer_ledger_state.accounts_map.clone();
@@ -242,3 +280,60 @@ async fn adopt_majority(validator_node: ValidatorNode){
 }
 
 
+// Helper function to serialize accounts_map with base64 encoded keys
+fn serialize_accounts_map(accounts_map: &HashMap<Vec<u8>, u64>) -> HashMap<String, u64> {
+    accounts_map.iter()
+        .map(|(k, v)| (encode(k), *v))
+        .collect()
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;  // Import the necessary structs and functions from the parent module.
+
+    #[test]
+    fn test_serialize_deserialize_cycle() {
+        // Setup a sample PeerLedgerResponse instance
+        let peer_ledger_response = PeerLedgerResponse {
+            action: "PeerLedgerResponse".to_string(),
+            blockchain: vec![
+                Block::Genesis { time: 1633046400 },
+                Block::Transaction {
+                    sender: vec![1, 2, 3],
+                    sender_balance: 500,
+                    recipient: vec![4, 5, 6],
+                    recipient_balance: 450,
+                    amount: 50,
+                    time: 1633046450,
+                    sender_nonce: 1,
+                    hash: vec![7, 8, 9],
+                },
+            ],
+            accounts_vec: vec![
+                Account {
+                    public_key: vec![1, 2, 3],
+                    obfuscated_private_key_hash: vec![4, 5, 6],
+                    balance: 1000,
+                    nonce: 0,
+                },
+            ],
+            accounts_map: {
+                let mut map = HashMap::new();
+                map.insert(vec![1, 2, 3], 1000u64);
+                map
+            },
+        };
+
+        // Serialize the response
+        let serialized = serialize_peer_ledger_response(&peer_ledger_response)
+            .expect("Serialization should succeed");
+
+        // Deserialize it back to an object
+        let deserialized = deserialize_peer_ledger_response(&serialized)
+            .expect("Deserialization should succeed");
+
+        // Assert that the deserialized object matches the original
+        assert_eq!(peer_ledger_response, deserialized, "Deserialized object should be equal to the original");
+    }
+}
