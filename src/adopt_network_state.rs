@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::collections::HashMap;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tokio::net::TcpStream;
 use tokio::io::AsyncWriteExt;
 use serde::{Serialize, Deserialize};
@@ -14,13 +14,24 @@ use crate::merkle_tree::{MerkleTree, Account};
 use crate::requests;
 use crate::constants::PEER_STATE_RECEPTION_DURATION;
 
+
+
+
+
+/**
+ * 
+
+Secret Key: "669815890583d2be695c2b5de3fd57cf0d69ba31ade6fe91000628348a19eebb"
+Public Key: "02e83d256e1cb8b999207261defc66f912740952b164de44b6cf4557cdb3af0571"
+ */
+
+
 /**
  * @notice chain_consensus.rs contains the logic for updating the local blockchain and merkle tree of a validator node
  * that is booting up to the majority state of the network. This is done by sending a request to all other validators
  * to send their current blockchain state. The node will then determine the majority state of the network and update
  * its local blockchain to reflect the majority.
 */
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerLedgerResponse {
@@ -41,9 +52,8 @@ pub async fn adopt_network_state(validator_node: ValidatorNode) {
     // Send request to all peers for their blockchain and merkle tree data
     requests::send_peer_ledger_request(validator_node.clone()).await;
 
-    // Wait for the listening period to end
-    tokio::time::sleep(PEER_STATE_RECEPTION_DURATION).await;
-    println!("Listening period has ended...");
+    // Wait for all active peers to respond with their ledgers
+    validator_node.await_all_peer_ledger_states_received().await;
 
     // Determine the majority state of the network and 
     // update the local blockchain and merkle tree
@@ -149,6 +159,11 @@ pub async fn adopt_network_state(validator_node: ValidatorNode) {
     // Store the PeerLedgerResponse struct in the peer_ledger_state vector
     peer_ledger_state_guard.push(peer_ledger_response);
 
+    // Notify the main thread that a new response is in. This will trigger an updated check of 
+    // whether all peers have responded. (See the validator_node impl in validation.rs)
+    let notify_all_ledgers_received: Arc<Notify> = validator_node.notify_all_ledgers_received.clone();
+    notify_all_ledgers_received.notify_one();
+    
     Ok(())
  }
 
@@ -221,5 +236,9 @@ async fn adopt_majority(validator_node: ValidatorNode){
     // Update local ledger to majority state
     blockchain_guard.chain = majority_peer_ledger_state.blockchain.clone();
     merkle_tree_guard.accounts_vec = majority_peer_ledger_state.accounts_vec.clone();
-    merkle_tree_guard.accounts_map = majority_peer_ledger_state.accounts_map.clone();   
+    merkle_tree_guard.accounts_map = majority_peer_ledger_state.accounts_map.clone();
+
+    println!("\n\n--- Adopted majority network state ---\n\n");   
 }
+
+

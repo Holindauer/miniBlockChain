@@ -142,8 +142,8 @@ pub async fn handle_consensus_response(request: Value, validator_node: validatio
     peer_decisions_guard.insert(request_hash.clone(), (true_count, false_count));
 
     // trigger the notify to wake up the main thread
-    let notify: Arc<Notify> = validator_node.notify.clone();
-    notify.notify_one();
+    let notify_consensus: Arc<Notify> = validator_node.notify_consensus.clone();
+    notify_consensus.notify_one();
 
     println!("Current peer votes to accept transaction: {}, votes to reject: {}", true_count, false_count);
     Ok(())

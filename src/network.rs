@@ -89,37 +89,45 @@ pub async fn start_listening(validator_node: ValidatorNode) {
 
     // Attempt to bind to one of the ports specified in the accepted_ports.json config file
     let (listener, client_port_address) = match try_bind_to_ports().await {
+
         Ok(result) => { println!("Listening on `{}...`", result.1); result },
         Err(e) => { eprintln!("Refused to bind to any configured port: {}", e); return; }
     };       
 
-    // set the client port address in mutable validator node master struct 
+    // In a mutable validator node set the client port address returned from try_bind_to_ports()
     let mut validator_node: ValidatorNode = validator_node;
     validator_node.client_port_address = client_port_address.clone();
 
-    // Start a separate task for sending heartbeats
-    let validator_node_clone: ValidatorNode = validator_node.clone();
+    // clone mutable validator node structs for use in the 3 below spawned tasks
+    let mut validator_node_clone_1: ValidatorNode = validator_node.clone();
+    let mut validator_node_clone_2: ValidatorNode = validator_node.clone();
+    let mut validator_node_clone_3: ValidatorNode = validator_node.clone();
+
+    // Spawn a task for sending heartbeat signals 
     tokio::spawn(async move {
-        send_heartbeat_periodically(validator_node_clone).await;
+        send_heartbeat_periodically(validator_node_clone_1).await;
     });
 
-    // Send a request to the network to adopt the majority state of the blockchain 5 seconds after listening starts
-    let validator_node_clone: ValidatorNode = validator_node.clone();
+    // Spawn a delayed request for peer ledger states so to adopt the majority of the network
     tokio::spawn(async move {
 
-        // wait 5 seconds before sending request to adopt network state
+        // wait a moment before sending request to adopt network state
         time::sleep(time::Duration::from_secs(5)).await;
 
-        // send request to peers to update to network majority blockchain state.    
-        adopt_network_state::adopt_network_state(validator_node_clone.clone()).await; 
+        // Prepare for responses by updating the count of active peers
+        validator_node.update_active_peer_count().await;
 
+        // send request to peers to update to network majority blockchain state.    
+        adopt_network_state::adopt_network_state(validator_node_clone_2).await; 
     });
 
     // Listen for incoming connections
     while let Ok((mut socket, _)) = listener.accept().await {
 
+        // For each incoming connection, clone the validator node for use in the spawned task
+        let validator_node_clone = validator_node_clone_3.clone();
+
         // Spawn a new task to handle the incoming message
-        let validator_node_clone = validator_node.clone();
         tokio::spawn(async move {
             
             // Read the incoming message into a buffer and pass into the master event handler

@@ -90,7 +90,8 @@ pub struct ValidatorNode {
     pub active_peers: Arc<Mutex<Vec<(String, u64)>>>, 
     pub total_peers: Arc<Mutex<usize>>, 
     pub peer_ledger_states: Arc<Mutex<Vec<PeerLedgerResponse>>>,
-    pub notify: Arc<Notify>, 
+    pub notify_consensus: Arc<Notify>, 
+    pub notify_all_ledgers_received: Arc<Notify>,
 }
 
 impl ValidatorNode { // initializes datastructures
@@ -104,21 +105,26 @@ impl ValidatorNode { // initializes datastructures
             active_peers: Arc::new(Mutex::new(Vec::new())),
             total_peers: Arc::new(Mutex::new(0)), // Init to zero, will be set when peers are know
             peer_ledger_states: Arc::new(Mutex::new(Vec::new())),
-            notify: Arc::new(Notify::new()),
+            notify_consensus: Arc::new(Notify::new()),
+            notify_all_ledgers_received: Arc::new(Notify::new()),
         }
     }
 
     // Updates the number of active peers in preparation to wait for their responses
-    pub async fn prepare_for_responses(&self) {
+    pub async fn update_active_peer_count(&self) {
+
+        // lock active peers and total peers
         let active_peers = self.active_peers.lock().await;
         let mut total_peers = self.total_peers.lock().await;
+
+        // update the total number of active peers
         *total_peers = active_peers.len();
     }
 
     // Checks if all responses have been received for a particular request
-    pub async fn check_all_responses_received(&self, request_hash: &Vec<u8>) -> bool {
+    pub async fn check_all_block_decisions_received(&self, request_hash: &Vec<u8>) -> bool {
 
-        // Retrive the number of responses for the request
+        // lock peer decisions map
         let peer_decisions_guard = self.peer_decisions.lock().await;
 
         // Get the number of true and false responses for the request, handling a None case w/ default values
@@ -132,27 +138,46 @@ impl ValidatorNode { // initializes datastructures
         true_count + false_count == total_peers
     }
 
-    // Awaits until all responses have been received
-    pub async fn await_responses(&self, request_hash: &Vec<u8>) {
+    // Awaits until all responses have been received using a notify struct
+    pub async fn await_all_block_decisions(&self, request_hash: &Vec<u8>) {
+        println!("Waiting for all peers to respond with their decision...");
 
-        // retrieve actove peers
-        let active_peers_guard = self.active_peers.lock().await;
-        let total_peers = active_peers_guard.len();
+        // retrieve active peers
+        let total_peers: usize = *self.total_peers.lock().await;
 
         // if there are no active peers, return 
         if total_peers == 0 { return; }
         
         // notify the validator node that all responses have been recieved
-        while !self.check_all_responses_received(request_hash).await {
-            self.notify.notified().await;
+        while !self.check_all_block_decisions_received(request_hash).await {
+            self.notify_consensus.notified().await;
         }
 
         // Once we break out of the loop, it means all responses are in
         let peer_decisions_guard = self.peer_decisions.lock().await;
-        let request_decisions: &(u32, u32) = peer_decisions_guard.get(request_hash).unwrap();
-        let (true_count, false_count) = request_decisions;
+        let (true_count, false_count): &(u32, u32) = peer_decisions_guard.get(request_hash).unwrap();
         println!("Received all responses for request: {} yays, {} nays", true_count, false_count);
     }
+
+    // awaits until all peer ledger states recieved from peers
+    pub async fn await_all_peer_ledger_states_received(&self) {
+        println!("Waiting for all peers to respond with their ledger states...");
+
+        // get total number of peers
+        let total_peers: usize = *self.total_peers.lock().await as usize;
+
+        // if there are no active peers, return 
+        if total_peers == 0 { return; }
+
+        // notify the validator node that all responses have been recieved
+        while self.peer_ledger_states.lock().await.len() != total_peers {
+            self.notify_all_ledgers_received.notified().await;
+        }
+
+        println!("All local ledger states from peers...");
+    }
+
+
 }
 
 /**
@@ -183,14 +208,14 @@ pub async fn handle_account_creation_request( request: Value, validator_node: Va
     // perform independent vallidation and store decision in validator node struct
     verify_account_creation_independently(request.clone(), validator_node.clone()).await;
 
-    // Prepare for responses (updating the count of active peers)
-    validator_node.prepare_for_responses().await;
+    // Prepare for responses by updating the count of active peers
+    validator_node.update_active_peer_count().await;
 
     // send for network consensus on the request
     requests::send_consensus_request( request.clone(), validator_node.clone() ).await;
 
     // await responses from all peers (checks that num peers matches num responses)
-    validator_node.await_responses(
+    validator_node.await_all_block_decisions(
         &network::hash_network_request(request.clone()).await
     ).await;
 
@@ -297,14 +322,14 @@ pub async fn handle_transaction_request(request: Value, validator_node: Validato
     // verify the transaction independently 
     verify_transaction_independently(request.clone(), validator_node.clone()).await;
 
-    // Prepare for responses (updating the count of active peers)
-    validator_node.prepare_for_responses().await;
+    // Prepare for responses by updating the count of active peers
+    validator_node.update_active_peer_count().await;
 
     // send for network consensus on the request
     requests::send_consensus_request( request.clone(), validator_node.clone() ).await;
 
     // await responses from all peers (checks that num peers matches num responses)
-    validator_node.await_responses(
+    validator_node.await_all_block_decisions(
         &network::hash_network_request(request.clone()).await
     ).await;
 
@@ -451,14 +476,14 @@ pub async fn handle_faucet_request(request: Value, validator_node: ValidatorNode
 
     ).await != true {  return Ok(()); }
 
-    // Prepare for responses (updating the count of active peers)
-    validator_node.prepare_for_responses().await;
+    // Prepare for responses by updating the count of active peers
+    validator_node.update_active_peer_count().await;
 
     // send for network consensus on the request
     requests::send_consensus_request( request.clone(), validator_node.clone() ).await;
 
     // await responses from all peers (checks that num peers matches num responses)
-    validator_node.await_responses(
+    validator_node.await_all_block_decisions(
         &network::hash_network_request(request.clone()).await
     ).await;
 
