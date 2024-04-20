@@ -336,6 +336,9 @@ pub async fn handle_transaction_request(request: Value, validator_node: Validato
     // Determine if the client's decision is the majority decision
     let peer_majority_decision: bool = consensus::determine_majority(request.clone(), validator_node.clone()).await;
 
+    // print peer majority decision
+    println!("Majority Decision: {}", peer_majority_decision);
+
     // return false if network consensus not reached
     if (peer_majority_decision == false) { return Ok(false);}
 
@@ -356,50 +359,51 @@ pub async fn handle_transaction_request(request: Value, validator_node: Validato
 async fn verify_transaction_independently(request: Value, validator_node: ValidatorNode)-> bool {
     println!("Performing Independent Validation of Transaction Request...");
   
-    // retrieve sender and recipient addresses from request
+    // retrieve request information
     let sender_address: Vec<u8> = request["sender_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
     let recipient_address: Vec<u8> = request["recipient_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
-
-    // retrieve transaction amount from request
     let transaction_amount: u64 = request["amount"].as_str().unwrap_or_default().parse().unwrap_or_default();
  
-    // retrieve sender obfuscated private key parts from the request
-    let curve_point_1: String = request["sender_obfuscated_private_key_part1"].as_str().unwrap_or_default().to_string(); 
-    let curve_point_2: String = request["sender_obfuscated_private_key_part2"].as_str().unwrap_or_default().to_string();
+    // lock client decisions map
+    let client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>> = validator_node.client_decisions.clone();
+    let mut client_decisions_guard: MutexGuard<HashMap<Vec<u8>, bool>> = client_decisions.lock().await;
 
     // Lock the merkle tree while accessing sender account info
     let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
     let merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
 
-    // Check that the both accounts already exist
-    let sender_exists: bool = merkle_tree_guard.account_exists(sender_address.clone());
-    let recipient_exists: bool = merkle_tree_guard.account_exists(recipient_address.clone());
-
-    // Verify the sender's private key using the zk_proof module 
-    let sender_private_key_hash: Vec<u8> = merkle_tree_guard.get_private_key_hash(sender_address.clone()).unwrap();
-    let knoweldge_of_private_key: bool = zk_proof::verify_points_sum_hash(&curve_point_1, &curve_point_2, sender_private_key_hash);
-        
-    // get sender and recipient balances    
-    let sender_balance: u64 = merkle_tree_guard.get_account_balance(sender_address.clone()).unwrap();
-    let sufficient_funds: bool = sender_balance >= transaction_amount;
-
-    // lock client decisions map
-    let client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>> = validator_node.client_decisions.clone();
-    let mut client_decisions_guard: MutexGuard<HashMap<Vec<u8>, bool>> = client_decisions.lock().await;
-
-    // make decision based on the checks
+    // declare decision
     let decision: bool;
-    if sender_exists && recipient_exists && knoweldge_of_private_key && sufficient_funds {
-        decision = true;
-    } else {
+
+    // Reject decision if the sender account does not exist in the merkle tree
+    if  merkle_tree_guard.account_exists(sender_address.clone()) != true { 
         decision = false;
     }
-
-    // insert the decision in the client decision map
+     // Reject decision if the recipient account does not exist in the merkle tree
+    else if  merkle_tree_guard.account_exists(recipient_address.clone()) != true { 
+        decision = false;
+    }
+    // Reject decision if the zk-proof fails
+    else if zk_proof::verify_points_sum_hash(
+        &request["sender_obfuscated_private_key_part1"].as_str().unwrap_or_default().to_string(),
+        &request["sender_obfuscated_private_key_part2"].as_str().unwrap_or_default().to_string(),
+        merkle_tree_guard.get_private_key_hash(sender_address.clone()).unwrap()
+    ) != true { 
+        decision = false; 
+    }
+    // Reject decision if the sender does not have enough balance to send the transaction
+    else if transaction_amount > merkle_tree_guard.get_account_balance(sender_address.clone()).unwrap(){
+        decision = false;
+    }
+    // Accept decision if all checks pass
+    else { decision = true; }
+        
+    // insert the decision in the client decision map 
     client_decisions_guard.insert(
         network::hash_network_request(request.clone()).await, decision
     );
 
+    // return true if all checks pass
     decision
 } // TODO issue #7 to be implemented here
 
@@ -458,6 +462,17 @@ async fn add_transaction_to_ledger(request: Value, validator_node: ValidatorNode
     blockchain_guard.store_incoming_requests(&new_account_request);
     blockchain_guard.push_block_to_chain(new_account_request);   
 
+}
+
+/**
+ * @notice save_failed_transaction_json() is an asynchronous function that saves a json file to the local directory that contains the number 1.
+ * If a failed transaction is detected in network.rs, this function will save the indcation to the root dir, used for integration testing.
+ */
+pub async fn save_failed_transaction_json(){
+
+    // save a simple json file that just contains the number 1 for failed transaction
+    let message_json = serde_json::to_string(&1).unwrap();
+    std::fs::write("failed_transaction.json", message_json).unwrap();
 }
 
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // Faucet Verification Logic
