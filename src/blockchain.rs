@@ -250,6 +250,42 @@ impl BlockChain {
     }
 }
 
+/**
+ * @notice BlockJson is a version of the Block enum that is used to serialize the blockchain to JSON. 
+ * @dev The only difference is that the addresses and hashes are stored as strings instead of byte vectors.
+ * for easier serialization to JSON and comparision within integration tests. 
+ */
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)] 
+pub enum BlockJson {
+    Genesis { 
+        time : u64
+    },
+    Transaction { 
+        sender: String, 
+        sender_balance: u64,
+        recipient: String, 
+        recipient_balance: u64,
+        amount: u64, 
+        time : u64, 
+        sender_nonce: u64, 
+        hash: String
+    },
+    NewAccount { 
+        address: String, 
+        account_balance: u64,
+        time: u64, 
+        hash: String
+    },
+    Faucet { 
+        address: String, 
+        account_balance: u64,
+        time: u64, 
+        hash: String
+    }
+}
+
+
+
 pub async fn save_chain_json(validator_node: ValidatorNode){
 
     // Lock blockchain for saving
@@ -258,6 +294,9 @@ pub async fn save_chain_json(validator_node: ValidatorNode){
 
     // Retrieve the chain from the blockchain
     let chain: Vec<Block> = blockchain_guard.chain.clone();
+
+    // Convert the Vec<Block> to Vec<BlockJson> for serialization
+    let vec_blockjson: Vec<BlockJson> = convert_vec_block_to_vec_blockjson(chain).await;
 
     // Get port number for node
     let port: String = validator_node.client_port_address.clone();
@@ -271,8 +310,75 @@ pub async fn save_chain_json(validator_node: ValidatorNode){
 
     // Serialize the blockchain to JSON
     let file = File::create(path).unwrap();
-    serde_json::to_writer_pretty(file, &chain).unwrap();
+    serde_json::to_writer_pretty(file, &vec_blockjson).unwrap();
 }
+
+
+/**
+ * @notice load_chain_json() is an asynchronous function that loads the blockchain from a JSON file.
+ * @dev This function is used to load the blockchain from a JSON file after the node has been restarted.
+ * @dev The blockchain is loaded from the JSON file and stored in the blockchain struct.
+ */
+async fn convert_vec_block_to_vec_blockjson(vec_block: Vec<Block>) -> Vec<BlockJson> {
+
+    let mut vec_blockjson: Vec<BlockJson> = Vec::new();
+
+    // convert all blocks to blockjson and push to vec_blockjson
+    for block in vec_block {
+        let block_json: BlockJson = convert_block_to_blockjson(block).await;
+        vec_blockjson.push(block_json);
+    }
+
+    vec_blockjson
+}
+
+/**
+ * @notice convert_block_to_blockjson() is an asynchronous function that converts a Block enum to a BlockJson enum.
+ * @dev This function is used to convert the blockchain to JSON for saving and sending to other nodes.
+ */
+async fn convert_block_to_blockjson(block: Block) -> BlockJson {
+
+    let block_json: BlockJson;
+
+    match block {
+        Block::Genesis { time } => {
+
+            // package genesis block data into BlockJson
+            block_json = BlockJson::Genesis { time };
+        },
+        Block::Transaction { sender, sender_balance, recipient, recipient_balance, amount, time, sender_nonce, hash } => {
+
+            // decode sender and recipient to strings
+            let sender = String::from_utf8(sender).unwrap();
+            let recipient = String::from_utf8(recipient).unwrap();
+            let hash = hex::encode(hash);
+
+            // package transaction block data into BlockJson
+            block_json = BlockJson::Transaction { sender, sender_balance, recipient, recipient_balance, amount, time, sender_nonce, hash };
+        },
+        Block::NewAccount { address, account_balance, time, hash } => {
+
+            // decode address and hash to strings
+            let address = String::from_utf8(address).unwrap();
+            let hash = hex::encode(hash);
+
+            // package new account block data into BlockJson
+            block_json = BlockJson::NewAccount { address, account_balance, time, hash };
+        },
+        Block::Faucet { address, account_balance, time, hash } => {
+            let address = String::from_utf8(address).unwrap();
+            let hash = hex::encode(hash);
+
+            // package faucet block data into BlockJson
+            block_json = BlockJson::Faucet { address, account_balance, time, hash };
+        },
+    }
+
+    block_json
+}
+
+
+
 
 
 /**
