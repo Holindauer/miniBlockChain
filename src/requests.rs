@@ -281,6 +281,7 @@ fn save_new_account_details_json(private_key: &String, public_key: &String) {
         public_key: public_key.to_string(),
     };
 
+
     // Save the account details to a json file
     let message_json: String = serde_json::to_string(&message).unwrap();
     std::fs::write("new_account_details.json", message_json).unwrap();

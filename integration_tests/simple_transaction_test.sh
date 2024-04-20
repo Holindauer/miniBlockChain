@@ -134,6 +134,7 @@ for json_entry in "${blockchain_data[@]}"; do
     # Check if 'Genesis' is the first key
     if [[ "$(echo "$json_entry" | jq -r '.[0] | keys[]')" != "Genesis" ]]; then
         echo "Error: The first block is not 'Genesis'."
+        killall xterm
         exit 1
     else
         echo "Genesis block verified."
@@ -142,6 +143,7 @@ for json_entry in "${blockchain_data[@]}"; do
     # Check if 'NewAccount' is the second key
     if [[ "$(echo "$json_entry" | jq -r '.[1] | keys[]')" != "NewAccount" ]]; then
         echo "Error: The second block is not 'NewAccount'. It is '$(echo "$json_entry" | jq -r '.[1] | keys[]')'."
+        killall xterm
         exit 1
     else
         echo "NewAccount block verified."
@@ -153,6 +155,7 @@ for json_entry in "${blockchain_data[@]}"; do
 
     if [[ "$new_account_address" != "$public_key_1" ]]; then
         echo "Error: The address in the NewAccount block does not match the expected public key. Found: $new_account_address"
+        killall xterm
         exit 1
     else
         echo "Address matches the public key."
@@ -161,6 +164,7 @@ for json_entry in "${blockchain_data[@]}"; do
     # Check if 'NewAccount' is the third key
     if [[ "$(echo "$json_entry" | jq -r '.[2] | keys[]')" != "NewAccount" ]]; then
         echo "Error: The third block is not 'NewAccount'. It is '$(echo "$json_entry" | jq -r '.[2] | keys[]')'."
+        killall xterm
         exit 1
     else
         echo "NewAccount block verified."
@@ -169,6 +173,7 @@ for json_entry in "${blockchain_data[@]}"; do
     # check if the address in the NewAccount block matches the expected public key
     if [[ "$(echo "$json_entry" | jq -r '.[2].NewAccount.address')" != "$public_key_2" ]]; then
         echo "Error: The address in the NewAccount block does not match the expected public key."
+        killall xterm
         exit 1
     else
         echo "Address matches the public key."
@@ -177,6 +182,7 @@ for json_entry in "${blockchain_data[@]}"; do
     # Check that 'Faucet' is the fourth key
     if [[ "$(echo "$json_entry" | jq -r '.[3] | keys[]')" != "Faucet" ]]; then
         echo "Error: The fourth block is not 'Faucet'. It is '$(echo "$json_entry" | jq -r '.[3] | keys[]')'."
+        killall xterm
         exit 1
     else
         echo "Faucet block verified."
@@ -185,6 +191,7 @@ for json_entry in "${blockchain_data[@]}"; do
     # Checl that the address in the Faucet block matches the expected public key
     if [[ "$(echo "$json_entry" | jq -r '.[3].Faucet.address')" != "$public_key_1" ]]; then
         echo "Error: The address in the Faucet block does not match the expected public key."
+        killall xterm
         exit 1
     else
         echo "Address matches the public key."
@@ -193,6 +200,7 @@ for json_entry in "${blockchain_data[@]}"; do
     # Check that the account_balance balance in the Faucet block is 100
     if [[ "$(echo "$json_entry" | jq -r '.[3].Faucet.account_balance')" != 100 ]]; then
         echo "Error: The balance in the Faucet block is not 100."
+        killall xterm
         exit 1
     else
         echo "Balance is 100."
@@ -201,6 +209,7 @@ for json_entry in "${blockchain_data[@]}"; do
     # Check that 'Transaction' is the fifth key
     if [[ "$(echo "$json_entry" | jq -r '.[4] | keys[]')" != "Transaction" ]]; then
         echo "Error: The fifth block is not 'Transaction'. It is '$(echo "$json_entry" | jq -r '.[4] | keys[]')'."
+        killall xterm
         exit 1
     else
         echo "Transaction block verified."
@@ -213,6 +222,7 @@ for json_entry in "${blockchain_data[@]}"; do
     # check that the sender address matches the expected public key
     if [[ "$sender_address" != "$public_key_1" ]]; then
         echo "Error: The sender address in the Transaction block does not match the expected public key."
+        killall xterm
         exit 1
     else
         echo "Sender address matches the public key."
@@ -221,6 +231,7 @@ for json_entry in "${blockchain_data[@]}"; do
     # check that the sender_balance in the Transaction block is 50
     if [[ "$(echo "$json_entry" | jq -r '.[4].Transaction.sender_balance')" != 50 ]]; then
         echo "Error: The sender balance in the Transaction block is not 50."
+        killall xterm
         exit 1
     else
         echo "Sender balance is 50."
@@ -232,6 +243,7 @@ for json_entry in "${blockchain_data[@]}"; do
 
     if [[ "$recipient_address" != "$public_key_2" ]]; then
         echo "Error: The recipient address in the Transaction block does not match the expected public key."
+        killall xterm
         exit 1
     else
         echo "Recipient address matches the public key."
@@ -240,6 +252,7 @@ for json_entry in "${blockchain_data[@]}"; do
     # Check that the recipient_balance in the Transaction block is 50
     if [[ "$(echo "$json_entry" | jq -r '.[4].Transaction.recipient_balance')" != 50 ]]; then
         echo "Error: The recipient balance in the Transaction block is not 50."
+        killall xterm
         exit 1
     else
         echo "Recipient balance is 50."

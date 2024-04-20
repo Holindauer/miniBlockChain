@@ -99,12 +99,12 @@ pub fn hash_obfuscated_private_key(obscured_private_key: RistrettoPoint) -> Vec<
 /**
  * @notice decompress_curve_points() accepts two Base64 encoded points and returns the decompressed Ristretto points
  */
-fn decompress_curve_points( encoded_point1: &str, encoded_point2: &str,) -> Result<(RistrettoPoint, RistrettoPoint), &'static str> {
+fn decompress_curve_points( encoded_key_curve_point_1: &str, encoded_key_curve_point_2: &str,) -> Result<(RistrettoPoint, RistrettoPoint), &'static str> {
     println!("zk_proof::decompress_curve_points() : Decompressing Base64 encoded curve points to Ristretto..."); 
 
     // convert encoded points (str) to bytes
-    let point1_bytes: Vec<u8> = decode(encoded_point1).map_err(|_| "Failed to decode point 1 from Base64")?;
-    let point2_bytes: Vec<u8> = decode(encoded_point2).map_err(|_| "Failed to decode point 2 from Base64")?;
+    let point1_bytes: Vec<u8> = decode(encoded_key_curve_point_1).map_err(|_| "Failed to decode point 1 from Base64")?;
+    let point2_bytes: Vec<u8> = decode(encoded_key_curve_point_2).map_err(|_| "Failed to decode point 2 from Base64")?;
 
     // Decompress the points from bytes
     let point1: RistrettoPoint = CompressedRistretto(point1_bytes.try_into().expect("Invalid length for point 1"))
@@ -123,11 +123,14 @@ fn decompress_curve_points( encoded_point1: &str, encoded_point2: &str,) -> Resu
  * compresses the sum, hashes it, and compares the hash to the expected hash. If they match, the function returns true.
  * If they do not match, the function returns false.
  */
-pub fn verify_points_sum_hash(encoded_point1: &str, encoded_point2: &str, expected_hash: Vec<u8>) -> bool {
+pub fn verify_points_sum_hash(encoded_key_curve_point_1: &str, encoded_key_curve_point_2: &str, expected_hash: Vec<u8>) -> bool {
     println!("zk_proof::verify_points_sum_hash() : Verifying hash of curve point sum adds to private key obfuscated curve point hash..."); 
 
     // convert encoded points (str) to Ristretto points
-    let (point1, point2) = decompress_curve_points(encoded_point1, encoded_point2).unwrap();
+    let (point1, point2) = decompress_curve_points(
+        encoded_key_curve_point_1, 
+        encoded_key_curve_point_2
+    ).unwrap();
 
     // Add the two Ristretto points together
     let sum_point: RistrettoPoint = point1 + point2;

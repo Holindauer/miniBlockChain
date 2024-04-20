@@ -178,13 +178,13 @@ If these are all true, the client decision is to validate and a request for cons
     Block 4: 
             Sender: 03b0866fbd47f93763c195d86f0e38a30fee7fffda718da0dc4b0866f49ee08ae4
             Sender Balance: 50
-            Sender Nonce: 0
+            Sender Nonce: 1
             Recipient: 027a8038a0a2f89096dc6021282009c24ef5a5544286fa88189c27d208d79551de
             Recipient Balance: 50
             Amount: 50
             Time: 1713547728
             Hash: 55442950180c4e60b9583a8cbe154ad2bb03337f430d9d8b97aeee4f5c6d4646
-    S
+    
 
 ## Integration Testing Dependencies 
 

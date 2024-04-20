@@ -125,13 +125,13 @@ pub async fn start_listening(validator_node: ValidatorNode) {
     while let Ok((mut socket, _)) = listener.accept().await {
 
         // For each incoming connection, clone the validator node for use in the spawned task
-        let validator_node_clone = validator_node_clone_3.clone();
+        let validator_node_clone: ValidatorNode = validator_node_clone_3.clone();
 
         // Spawn a new task to handle the incoming message
         tokio::spawn(async move {
             
             // Read the incoming message into a buffer and pass into the master event handler
-            let mut buffer = Vec::new();
+            let mut buffer: Vec<u8> = Vec::new();
             if socket.read_to_end(&mut buffer).await.is_ok() && !buffer.is_empty() {
                 handle_incoming_message(&buffer, validator_node_clone).await;
             }
@@ -166,8 +166,11 @@ async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode )
             },
             Some("Transaction") => { 
                 match validation::handle_transaction_request(request, validator_node.clone()).await {
-                    Ok(success) => { if success { println!("Transaction Validated..."); } },
-                    Err(e) => {eprintln!("Transaction Validation Error: {}", e);}
+                    Ok(success) => { 
+                        if success { println!("Transaction Validated..."); } 
+                        else {validation::save_failed_transaction_json().await; } // indicate a failed transaction for integration tests
+                    },
+                    Err(e) => { eprintln!("Transaction Validation Error: {}", e); }
                 }
             },
             Some("Faucet") => { 
