@@ -57,6 +57,12 @@ use crate::adopt_network_state::PeerLedgerResponse;
  * @param client_port_address: String - The port address that the client is listening on for incoming connections. 
  * This is used to establish a connection with the client from the network.
  * 
+ * @param used_zk_proofs: Arc<Mutex<Vec<u8>, String>> - A hashmap that stores the zk-proofs that hahses of the 
+ * zk-proofs have been used by a requester to verify transactions. The key is the address of the client and the 
+ * value is a hash of the zk-proof. This datastructure is used to prevent replay attacks with zk-proofs. This 
+ * is because the same curve points will always add to the third curve point (the obscured private key) so
+ * allowing the resuse of the same zk-proof would enable a listener to replay the same transaction multiple times.
+ * 
  * @param active_peers: Arc<Mutex<Vec<(String, u64)>>> - A vector of (String, u64) tuples containing the addresses 
  * of all active peers (as represented by their port address) on the network and the timestamp of the last recieved 
  * heartbeat from this peer. This datastructure is maintained by the validator node via a blocked on heartbeat 
@@ -87,6 +93,7 @@ pub struct ValidatorNode {
     pub peer_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>>, 
     pub client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>>,
     pub client_port_address: String,    
+    pub used_zk_proofs: Arc<Mutex<HashMap<Vec<u8>, Vec<String>>>>, // address -> vec of hashes of zk-proofs
     pub active_peers: Arc<Mutex<Vec<(String, u64)>>>, 
     pub total_peers: Arc<Mutex<usize>>, 
     pub peer_ledger_states: Arc<Mutex<Vec<PeerLedgerResponse>>>,
@@ -102,6 +109,7 @@ impl ValidatorNode { // initializes datastructures
             peer_decisions: Arc::new(Mutex::new(HashMap::new())),
             client_decisions: Arc::new(Mutex::new(HashMap::new())),
             client_port_address: String::new(),
+            used_zk_proofs: Arc::new(Mutex::new(HashMap::new())),
             active_peers: Arc::new(Mutex::new(Vec::new())),
             total_peers: Arc::new(Mutex::new(0)), // Init to zero, will be set when peers are know
             peer_ledger_states: Arc::new(Mutex::new(Vec::new())),
@@ -385,10 +393,12 @@ async fn verify_transaction_independently(request: Value, validator_node: Valida
     }
     // Reject decision if the zk-proof fails
     else if zk_proof::verify_points_sum_hash(
-        &request["sender_obfuscated_private_key_part1"].as_str().unwrap_or_default().to_string(),
-        &request["sender_obfuscated_private_key_part2"].as_str().unwrap_or_default().to_string(),
-        merkle_tree_guard.get_private_key_hash(sender_address.clone()).unwrap()
-    ) != true { 
+        &request["encoded_key_curve_point_1"].as_str().unwrap_or_default().to_string(),
+        &request["encoded_key_curve_point_2"].as_str().unwrap_or_default().to_string(),
+        merkle_tree_guard.get_private_key_hash(sender_address.clone()).unwrap(),
+        sender_address.clone(),
+        validator_node.clone()
+    ).await != true { 
         decision = false; 
     }
     // Reject decision if the sender does not have enough balance to send the transaction

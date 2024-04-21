@@ -33,8 +33,8 @@ use crate::validation::ValidatorNode;
      },
      Transaction {
          sender_public_key: String,
-         sender_obfuscated_private_key_part1: String,
-         sender_obfuscated_private_key_part2: String,
+         encoded_key_curve_point_1: String,
+         encoded_key_curve_point_2: String,
          recipient_public_key: String,
          amount: String,
      },
@@ -117,8 +117,8 @@ pub async fn send_transaction_request(sender_private_key: String, recipient_publ
     // Package the message
     let request = NetworkRequest::Transaction {
         sender_public_key,
-        sender_obfuscated_private_key_part1: encoded_key_point_1,
-        sender_obfuscated_private_key_part2: encoded_key_point_2,
+        encoded_key_curve_point_1: encoded_key_point_1,
+        encoded_key_curve_point_2: encoded_key_point_2,
         recipient_public_key,
         amount,
     };

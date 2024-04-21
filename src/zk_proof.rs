@@ -6,9 +6,14 @@ use secp256k1::{SecretKey, PublicKey, Secp256k1};
 use sha2::{Digest, Sha256};
 use base64::decode;
 use std::convert::TryInto;
+use std::collections::HashMap;
 use std::io;
 use rand::rngs::OsRng; // cryptographically secure RNG
-use rand::{thread_rng, RngCore}; // Ensure thread_rng is imported here
+use rand::{thread_rng, RngCore};
+use tokio::sync::Mutex;
+use std::sync::Arc;
+
+use crate::validation::ValidatorNode; // Ensure thread_rng is imported here
 
 /**
  * @notice zk_proof.rs contains the logic for generating a simple zero-knowledge proof for verification of knowledge of 
@@ -123,8 +128,28 @@ fn decompress_curve_points( encoded_key_curve_point_1: &str, encoded_key_curve_p
  * compresses the sum, hashes it, and compares the hash to the expected hash. If they match, the function returns true.
  * If they do not match, the function returns false.
  */
-pub fn verify_points_sum_hash(encoded_key_curve_point_1: &str, encoded_key_curve_point_2: &str, expected_hash: Vec<u8>) -> bool {
+pub async fn verify_points_sum_hash(
+    encoded_key_curve_point_1: &str, 
+    encoded_key_curve_point_2: &str, 
+    expected_hash: Vec<u8>, 
+    sender_address: Vec<u8>,
+    validator_node: ValidatorNode
+) -> bool {
     println!("zk_proof::verify_points_sum_hash() : Verifying hash of curve point sum adds to private key obfuscated curve point hash..."); 
+
+    // Retrieve the zk_proofs that have already been used
+    let used_zk_proofs: Arc<Mutex<HashMap<Vec<u8>, Vec<String>>>> = validator_node.used_zk_proofs.clone();   
+    let mut used_zk_proofs_guard = used_zk_proofs.lock().await;
+
+    // hash the proof as it was recieved
+    let hash_of_proof: String = hash_zk_proof(encoded_key_curve_point_1, encoded_key_curve_point_2);
+
+    // Reject the proof if it has already been used
+    if let Some(used_proofs) = used_zk_proofs_guard.get(&sender_address) {
+        if used_proofs.contains(&hash_of_proof) {
+            return false;
+        }
+    }
 
     // convert encoded points (str) to Ristretto points
     let (point1, point2) = decompress_curve_points(
@@ -139,8 +164,42 @@ pub fn verify_points_sum_hash(encoded_key_curve_point_1: &str, encoded_key_curve
     let sum_point_bytes: [u8; 32] = sum_point.compress().to_bytes();
     let hash_of_sum = Sha256::digest(&sum_point_bytes);
     
-    // Compare the generated hash with the expected hash
-    hash_of_sum.as_slice() == expected_hash.as_slice()
+    // The generated hash with the expected hash
+    if hash_of_sum.as_slice() == expected_hash.as_slice() {
+
+        // add the hash of the proof to the used zk_proofs hash map
+        if let Some(proofs) = used_zk_proofs_guard.get_mut(&sender_address) {
+            proofs.push(hash_of_proof);
+        } else {
+            used_zk_proofs_guard.insert(sender_address, vec![hash_of_proof]);
+        }
+        
+        // indicate valid knowledge of private key
+        return true;
+    }   
+
+    // indicate invalid knowledge of private key
+    false
+}
+
+/**
+ * @notice this function hashes the encoded string representation of the two curve points that make 
+ * up the zk proof provided by the requester. The points are hashed using sha256 and returned.
+ */
+fn hash_zk_proof(encoded_key_curve_point_1: &str, encoded_key_curve_point_2: &str) -> String {
+
+    // Decode the Base64 encoded points
+    let point1_bytes: Vec<u8> = decode(encoded_key_curve_point_1).unwrap();
+    let point2_bytes: Vec<u8> = decode(encoded_key_curve_point_2).unwrap();
+
+    // Hash the two points
+    let mut hasher = Sha256::new();
+    hasher.update(point1_bytes);
+    hasher.update(point2_bytes);
+    let hash = hasher.finalize();
+
+    // Return the hash as a hex string
+    hex::encode(hash)
 }
 
 
@@ -149,7 +208,6 @@ pub fn verify_points_sum_hash(encoded_key_curve_point_1: &str, encoded_key_curve
  * @return a tuple of the secret and public key generated for the new account.
  */
 pub fn generate_keypair() -> Result<(SecretKey, PublicKey), io::Error> {
-    println!("zk_proof::generate_keypair() : Generating new publlic and private keypair...");
 
     // Create a new secp256k1 context
     let secp = Secp256k1::new();
@@ -177,7 +235,6 @@ pub fn generate_keypair() -> Result<(SecretKey, PublicKey), io::Error> {
  * derived from the private key as a hex encoded string.
  */
 pub fn derive_public_key_from_private_key( private_key: &String ) -> String {
-    println!("zk_proof::derive_public_key_from_private_key()...");
 
     // Create a new secp256k1 context
     let secp = Secp256k1::new();
