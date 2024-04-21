@@ -13,6 +13,7 @@ use rand::{thread_rng, RngCore};
 use tokio::sync::Mutex;
 use std::sync::Arc;
 
+use crate::modules::constants::INTEGRATION_TEST;
 use crate::modules::validation::ValidatorNode; // Ensure thread_rng is imported here
 
 /**
@@ -147,6 +148,15 @@ pub async fn verify_points_sum_hash(
     // Reject the proof if it has already been used
     if let Some(used_proofs) = used_zk_proofs_guard.get(&sender_address) {
         if used_proofs.contains(&hash_of_proof) {
+            
+            println!("Proof has already been used, rejecting...");
+
+            // save a json file called "proof_rejected.json" with a single 1 inside for integration testing
+            if INTEGRATION_TEST { 
+                let proof_rejected = serde_json::to_string(&1).unwrap();
+                std::fs::write("proof_rejected.json", proof_rejected).expect("Unable to write file");
+            }
+
             return false;
         }
     }

@@ -7,20 +7,24 @@ echo
 
 
 # run simple transaction integration test between two newly made accounts accounts
-./integration_tests/simple_transaction_test.sh
+./test_scripts/simple_transaction_test.sh
 test_1_result=$?
 
 # run simple transaction w/ incorrect private key integration test between two newly made accounts accounts
-./integration_tests/incorrect_private_key_test.sh
+./test_scripts/incorrect_private_key_test.sh
 test_2_result=$?
 
 # run faucet request integration test
-./integration_tests/faucet_test.sh
+./test_scripts/faucet_test.sh
 test_3_result=$?
 
 # run faucet request integration test
-./integration_tests/peer_state_adoption_test.sh
+./test_scripts/peer_state_adoption_test.sh
 test_4_result=$?
+
+# run faucet request integration test
+./test_scripts/proof_reuse_rejection_test.sh
+test_5_result=$?
 
 
 clear
@@ -59,6 +63,18 @@ else
     echo " - Peer Ledger State Adoption Test... FAIL!"
     echo " - "
 fi
+
+
+# check result of faucet request test
+if [ "$test_5_result" -eq 0 ]; then
+    echo "ZK Proof Reuse Rehjection Test... pass"
+else
+    echo " - "
+    echo " - ZK Proof Reuse Rehjection Test... FAIL!"
+    echo " - "
+fi
+
+
 
 
 

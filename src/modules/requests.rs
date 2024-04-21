@@ -92,7 +92,9 @@ pub async fn send_account_creation_request(){
 
     // print hunman readable account details
     print_human_readable_account_details(&secret_key, &public_key);
-    if INTEGRATION_TEST { save_new_account_details_json(&secret_key.to_string(), &public_key.to_string()); }
+    if INTEGRATION_TEST { 
+        save_new_account_details_json(&secret_key.to_string(), &public_key.to_string()); 
+    }
 }
 
 
@@ -218,7 +220,7 @@ pub async fn send_heartbeat_request(validator_node: ValidatorNode) {
 /**
  * @notice send_json_request() sends a json request to all accepted ports on the network
  */
-async fn send_json_request_to_all_ports(request_json: String) {
+pub async fn send_json_request_to_all_ports(request_json: String) {
 
     // Load accepted ports configuration
     let config_data: String = fs::read_to_string("accepted_ports.json").map_err(|e| io::Error::new(io::ErrorKind::Other, e)).unwrap();

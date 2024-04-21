@@ -1,5 +1,4 @@
 #!/bin/bash
-#!/bin/bash
 
 # This script contains an integration test for sending a transaction between two newly created
 # accounts. It will create two new accounts, save their public and private key information, and 

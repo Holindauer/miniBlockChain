@@ -147,7 +147,9 @@ Upon recieving this request, validator nodes will check the following to vlaidat
 
 2. The curve points add to the curve point representaiton of the private key within the merkel tree for the sender public key provided.
 
-3. The sender has sufficient funds for sending the specified transactiona amount.
+3. If the zk-proof is valid, the proof will be stored. Subsequest proofs for the same sender will not allow this proof to be used again. This is to not allow for replay attacks by using the same proof again. 
+
+4. The sender has sufficient funds for sending the specified transactiona amount.
 
 If these are all true, the client decision is to validate and a request for consensus is sent to the network. If the majority comes back as yes, the account balances are updated in the merkel tree and a new block is written to the chain.
 

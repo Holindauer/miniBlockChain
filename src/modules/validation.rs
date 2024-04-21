@@ -11,7 +11,6 @@ use crate::modules::consensus;
 use crate::modules::zk_proof;
 use crate::modules::network;
 use crate::modules::requests;
-use crate::modules::adopt_network_state;
 use crate::modules::adopt_network_state::PeerLedgerResponse;
 
 /**
