@@ -1,12 +1,6 @@
-mod blockchain;
-mod validation;
-mod merkle_tree;
-mod zk_proof;
-mod constants;
-mod adopt_network_state;
-mod consensus;
-mod network;
-mod requests;
+mod modules;
+use crate::modules::requests;
+use crate::modules::validation;
 
 use std::env;
 

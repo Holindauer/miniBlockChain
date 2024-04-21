@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::collections::HashMap;
 
 
-use crate::validation;
-use crate::network;
+use crate::modules::validation;
+use crate::modules::network;
 
 
 /**

@@ -13,7 +13,7 @@ use rand::{thread_rng, RngCore};
 use tokio::sync::Mutex;
 use std::sync::Arc;
 
-use crate::validation::ValidatorNode; // Ensure thread_rng is imported here
+use crate::modules::validation::ValidatorNode; // Ensure thread_rng is imported here
 
 /**
  * @notice zk_proof.rs contains the logic for generating a simple zero-knowledge proof for verification of knowledge of 

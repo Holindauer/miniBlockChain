@@ -12,11 +12,11 @@ use std::{fmt, collections::HashMap};
 
 use serde_json::{Result as JsonResult, Value};
 
-use crate::validation::ValidatorNode;
-use crate::blockchain::{BlockChain, Block};
-use crate::merkle_tree::{MerkleTree, Account};
-use crate::requests;
-use crate::constants::PEER_STATE_RECEPTION_DURATION;
+use crate::modules::validation::ValidatorNode;
+use crate::modules::blockchain::{BlockChain, Block};
+use crate::modules::merkle_tree::{MerkleTree, Account};
+use crate::modules::requests;
+use crate::modules::constants::PEER_STATE_RECEPTION_DURATION;
 
 
 /**
@@ -222,12 +222,8 @@ pub async fn adopt_network_state(validator_node: ValidatorNode) {
   */
  pub async fn handle_peer_ledger_response(response: Value, validator_node: ValidatorNode)-> Result<(), Box<dyn std::error::Error>> {
 
-    println!("Response received from peer node: {}", response);
-
     // Deserialize the JSON string into a PeerLedgerResponse struct
     let peer_ledger_response: PeerLedgerResponse = serde_json::from_str(&response.to_string()).unwrap();
-
-    println!("Peer Ledger Response: {:?}", peer_ledger_response);
 
     // Lock the peer_ledger_state mutex
     let peer_ledger_state: Arc<Mutex<Vec<PeerLedgerResponse>>> = validator_node.peer_ledger_states.clone();

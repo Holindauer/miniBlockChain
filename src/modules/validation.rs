@@ -4,15 +4,15 @@ use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 use std::collections::HashMap;
 
-use crate::blockchain::{BlockChain, Block};
-use crate::merkle_tree::{MerkleTree, Account};
-use crate::constants::{FAUCET_AMOUNT, HEARTBEAT_TIMEOUT};
-use crate::consensus;
-use crate::zk_proof;
-use crate::network;
-use crate::requests;
-use crate::adopt_network_state;
-use crate::adopt_network_state::PeerLedgerResponse;
+use crate::modules::blockchain::{BlockChain, Block};
+use crate::modules::merkle_tree::{MerkleTree, Account};
+use crate::modules::constants::{FAUCET_AMOUNT, HEARTBEAT_TIMEOUT};
+use crate::modules::consensus;
+use crate::modules::zk_proof;
+use crate::modules::network;
+use crate::modules::requests;
+use crate::modules::adopt_network_state;
+use crate::modules::adopt_network_state::PeerLedgerResponse;
 
 /**
  * @protocol validation.rs contains the data structures and event handler logic for running a validator node. 

@@ -8,14 +8,14 @@ use std::{io, fs};
 extern crate secp256k1;
 use secp256k1::{SecretKey, PublicKey};
 extern crate rand;
-use crate::constants::INTEGRATION_TEST;
+use crate::modules::constants::INTEGRATION_TEST;
 extern crate hex;
 use base64;
 
-use crate::zk_proof;
-use crate::network::NetworkConfig;
-use crate::network;
-use crate::validation::ValidatorNode;
+use crate::modules::zk_proof;
+use crate::modules::network::NetworkConfig;
+use crate::modules::network;
+use crate::modules::validation::ValidatorNode;
 /**
  * @notice requests.rs contains functions for sending different types of requests to the blockchain network. The three 
  * basic types of request are: account creation, transaction, and faucet requests. Upon recieving one of thee requests,

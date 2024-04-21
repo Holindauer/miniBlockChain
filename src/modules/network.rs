@@ -6,13 +6,13 @@ use tokio::time;
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use crate::validation;
-use crate::validation::ValidatorNode;
-use crate::constants::HEARTBEAT_PERIOD;
-use crate::consensus;
-use crate::blockchain::{print_chain, save_chain_json};
-use crate::requests;
-use crate::adopt_network_state;
+use crate::modules::validation;
+use crate::modules::validation::ValidatorNode;
+use crate::modules::constants::HEARTBEAT_PERIOD;
+use crate::modules::consensus;
+use crate::modules::blockchain::{print_chain, save_chain_json};
+use crate::modules::requests;
+use crate::modules::adopt_network_state;
 
 
 /**

@@ -6,7 +6,7 @@ use serde::{Serialize, Deserialize};
 use tokio::sync::{Mutex, MutexGuard};
 use std::sync::Arc;
 
-use crate::validation::ValidatorNode;
+use crate::modules::validation::ValidatorNode;
 
 /**
  * @notice blockchain.rs contains the structs and methods for creating and manipulating blocks in the blockchain.
