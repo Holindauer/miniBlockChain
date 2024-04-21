@@ -18,6 +18,10 @@ test_2_result=$?
 ./integration_tests/faucet_test.sh
 test_3_result=$?
 
+# run faucet request integration test
+./integration_tests/peer_state_adoption_test.sh
+test_4_result=$?
+
 
 clear
 
@@ -38,13 +42,21 @@ else
     echo " - Incorrect Private Key Test... FAIL!"
     echo " - "
 fi
-
 # check result of faucet request test
 if [ "$test_3_result" -eq 0 ]; then
     echo "Faucet Request Test... pass"
 else
     echo " - "
     echo " - Faucet Request Test... FAIL!"
+    echo " - "
+fi
+
+# check result of faucet request test
+if [ "$test_4_result" -eq 0 ]; then
+    echo "Peer Ledger State Adoption Test... pass"
+else
+    echo " - "
+    echo " - Peer Ledger State Adoption Test... FAIL!"
     echo " - "
 fi
 

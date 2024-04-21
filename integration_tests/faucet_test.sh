@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # This script contains an integration test for using the faucet to recieve funds from the faucet
-
+# A new account is made and the faucet is used for it. The test ensures that 100 tokens were 
+# recieved by the reqeust
 
 # Ensure jq and xterm are installed
 if ! [ -x "$(command -v jq)" ]; then
