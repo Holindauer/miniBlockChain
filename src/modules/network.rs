@@ -22,8 +22,9 @@ use crate::modules::adopt_network_state;
  * HEARTBEAT_PERIOD seconds.
  */
 
+
  /**
- * @notice the following structs are used to load in the accepted_ports.json file which contains a llist
+ * @notice the following structs are used to load in the accepted_ports.json file which contains a list
  * of accepted ports for the network. When a node is booted up, if the port cannot connnect to the network,
  * an excpetion will be thrown and handled by attempting to connect to the next port in the list.
  */
@@ -133,7 +134,7 @@ pub async fn start_listening(validator_node: ValidatorNode) {
             // Read the incoming message into a buffer and pass into the master event handler
             let mut buffer: Vec<u8> = Vec::new();
             if socket.read_to_end(&mut buffer).await.is_ok() && !buffer.is_empty() {
-                handle_incoming_message(&buffer, validator_node_clone).await;
+                master_events_handler(&buffer, validator_node_clone).await;
             }
         });
     }
@@ -141,10 +142,11 @@ pub async fn start_listening(validator_node: ValidatorNode) {
 }
 
 /**
- * @notice handle_incoming_message() asynchronously accepts a msg buffer and the current state of the merkle tree 
- * and blockchain. The buffer is parsed and the next step for the request is determined from the msg contents. 
+ * @notice master_events_handler() asynchronously accepts a recieved msg buffer recieved by the network. This buffer contains a
+ * request() that is parsed into a JSON object. Based on the 'action' field, the function will filter the request into the 
+ * appropritate event handler. The event handlers are responsible for validating the request and updating the blockchain state.
  */
-async fn handle_incoming_message( buffer: &[u8], validator_node: ValidatorNode ) {
+async fn master_events_handler( buffer: &[u8], validator_node: ValidatorNode ) {
     println!("\nNew Message Recieved...");
 
     // convert the buffer to a string 

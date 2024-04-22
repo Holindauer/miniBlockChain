@@ -192,7 +192,7 @@ impl ValidatorNode { // initializes datastructures
  * the ValidatorNode struct, sending a request to active peer node for the majority state of the networks and connecting a TCP 
  * listener to the network to start listening for incomring requests.
  */
-pub async fn run_validation(private_key: &String) {
+pub async fn run_validation() {
     println!("\nBooting up validator node..."); 
 
     // init validator node struct w/ empty blockchain and merkle tree

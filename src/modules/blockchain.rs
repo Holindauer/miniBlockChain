@@ -1,29 +1,20 @@
 use sha2::{Sha256, Digest};
+
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
-use serde::{Serialize, Deserialize};
-use tokio::sync::{Mutex, MutexGuard};
 use std::sync::Arc;
+
+use serde::{Serialize, Deserialize};
+
+use tokio::sync::{Mutex, MutexGuard};
+
 
 use crate::modules::validation::ValidatorNode;
 
 /**
  * @notice blockchain.rs contains the structs and methods for creating and manipulating blocks in the blockchain.
- * There are three types of blocks in the blockchain: Genesis, Transaction, and Account Creation.
- * 
- * Genesis Block: 
- *    The first block in the blockchain. It is hardcoded into the blockchain and contains no data other than creation 
- *    time.
- * 
- * Transaction Block:
- *    Tranasaction blocks contain the information revalavant to a single transaction of value between two users. 
- *    This includes the public key of the sender, the public key of the recipient, the amount being transacted,
- *    the timestamp of the transaction, and the hash of all this block data. 
- * 
- * Account Creation Block:
- *    Account creation blocks contain the information relevant to the creation of a new account. This includes 
- *    the public key of the new account, the timestamp of the account creation, and the hash of this block data.
+ * There are three types of blocks in the blockchain: Genesis, Transaction, Account Creation, and Faucet. 
  */
 
 
@@ -32,6 +23,10 @@ use crate::modules::validation::ValidatorNode;
   * @notice Block is an enum that represents the different types of blocks that can be added to the blockchain.
   * @dev The Block enum is used to store the data of the block and differentiate between the different types of blocks.
   * @dev All addresses are stored as UTF-8 encoded byte vectors.
+  * @param Genesis - a block that contains only the timestamp of the block creation.
+  * @param Transaction - a block that contains the data of a single transaction between two users.
+  * @param NewAccount - a block that contains the data of a new account creation
+  * @param Faucet - a block that contains the data of a faucet transaction.
 */
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)] 
 pub enum Block {
@@ -90,7 +85,7 @@ impl BlockChain {
     pub fn new() -> Self {
         println!("Creating new BlockChain struct..."); 
 
-        // Create a new blockchain 
+        // Create a new empty blockchain 
         let mut blockchain: BlockChain = BlockChain {
             chain: Vec::new(),
             pending_request_queue: VecDeque::new(),
@@ -150,7 +145,7 @@ impl BlockChain {
 
         // Set the hash of the block
         let mut new_block = new_block.clone();
-        self.hash_block_data(&mut new_block);
+        self.set_block_hash(&mut new_block);
 
         // Push the new block to the blockchain
         self.chain.push(new_block.clone());    
@@ -165,7 +160,7 @@ impl BlockChain {
     }
 
     // Sets the hash of a block based on its data
-    fn hash_block_data(&mut self, block: &mut Block) {
+    fn set_block_hash(&mut self, block: &mut Block) {
 
         let mut hasher = Sha256::new(); // new SHA256 hasher
     
@@ -285,7 +280,11 @@ pub enum BlockJson {
 }
 
 
-
+/**
+ * @notice save_chain_json() is an asynchronous function that saves the blockchain to a JSON file.
+ * @dev This function is used to save the blockchain to a JSON file after the node has been restarted.
+ * @dev The blockchain is saved to the JSON file in the format of a vector of BlockJson enums.
+ */
 pub async fn save_chain_json(validator_node: ValidatorNode){
 
     // Lock blockchain for saving
@@ -376,9 +375,6 @@ async fn convert_block_to_blockjson(block: Block) -> BlockJson {
 
     block_json
 }
-
-
-
 
 
 /**

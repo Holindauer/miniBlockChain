@@ -49,15 +49,15 @@ for dir in "${saved_ledger_directories[@]}"; do
 done
 
 # Open a new terminal to run a validator node
-xterm -hold -e "bash -c 'cargo run validate private_key'" &
+xterm -hold -e "bash -c 'cargo run validate'" &
 
 # Wait for the validator node to initialize and start
 sleep 3
 
 # Open 3 more terminals to run additional validator nodes
-xterm -hold -e "bash -c 'cargo run validate private_key'" &
-xterm -hold -e "bash -c 'cargo run validate private_key'" &
-xterm -hold -e "bash -c 'cargo run validate private_key'" &
+xterm -hold -e "bash -c 'cargo run validate'" &
+xterm -hold -e "bash -c 'cargo run validate'" &
+xterm -hold -e "bash -c 'cargo run validate'" &
 
 # Wait 7 seconds for the new nodes to adopt the network state
 sleep 7

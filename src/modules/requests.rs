@@ -16,14 +16,23 @@ use crate::modules::zk_proof;
 use crate::modules::network::NetworkConfig;
 use crate::modules::network;
 use crate::modules::validation::ValidatorNode;
+
+
 /**
- * @notice requests.rs contains functions for sending different types of requests to the blockchain network. The three 
- * basic types of request are: account creation, transaction, and faucet requests. Upon recieving one of thee requests,
- * the peer to peer network of validator nodes will process, validate, and reach a consensus over how to handle the 
- * request. The network will then update the blockchain and merkle tree accordingly. 
+ * @notice requests.rs contains functions for sending different types of requests to the blockchain network. Upon 
+ * recieving as request, the peer-to-peer network of validator nodes will process, validate, and reach a consensus 
+ * over how to handle the request. The network will then update the blockchain and merkle tree accordingly. 
  */
 
 
+ /**
+ * @notice NetworkRequest is an enum that encapsulates the different types of requests that can be sent to the network.
+ * The enum is serialized and deserialized to JSON for transmission over the network. The different types of requests
+ * include AccountCreation, Transaction, Faucet, ConsensusRequest, HeartBeat, and PeerLedgerRequest.
+ * @dev the 'action' tag is used to specify the type of request based on the 'action' field. This is used by the
+ * network::master_event_handler() to filter the recieved, serialized version of this struct into the correct variant
+ * event handler.    
+*/
  #[derive(Serialize, Deserialize, Clone, Debug)]
  #[serde(tag = "action")] // Adding a tag to specify the type of request based on the 'action' field
  pub enum NetworkRequest {
@@ -56,7 +65,7 @@ use crate::modules::validation::ValidatorNode;
 
 /**
  * @notice NewAccountDetailsTestOutput encapsulate the details of a new account created on the blockchain 
- * for the purpose of printing these outputs to terminal during testing for validation/use in other tests
+ * for integration testing. The struct is serialized and deserialized to JSON for saving the account details.
  */
 #[derive(Serialize, Deserialize)]
 struct NewAccountDetailsTestOutput {
@@ -65,8 +74,8 @@ struct NewAccountDetailsTestOutput {
 }
    
 /**
- * @notice send_account_creation_msg() asynchonously creates a new private/public keypair, creates the 
- * obfuscated private key hash, and sends the account creation request to the network as a json object.
+ * @notice send_account_creation_msg() asynchonously creates a new private/public keypair, obfuscates the private key 
+ * using elliptic curve cryptography, and sends the public key and obfuscated private key hash to the network.
  */
 pub async fn send_account_creation_request(){
     println!("Sending Account Creation Request...");
@@ -99,9 +108,12 @@ pub async fn send_account_creation_request(){
 
 
  /**
- * @notice send_transcation_request() asynchonously packages a transaction request and sends it to the network.
- * @dev The sender's private key is split into two parts, each multiplied by the generator point of the curve25519
- *      elliptic curve. The points are base64 encoded and sent to the network along w/ other transaction details.
+ * @notice send_transcation_request() sends a request to the network to transfer a given amount of tokens from one account to another.
+ * The request includes the public key of the sender, the public key of the recipient, and the amount of tokens to transfer.
+ * @dev The sender's private key is used to derive the sender's public key, which is included in the request. The sender's private key
+ * is also used to generate two elliptic curve points, which are base64 encoded and included in the request. These curve points are 
+ * used as a zk-proof that when added together, should match the curve point stored in the merkle tree for the sender account. 
+ * The recipient's public key is included in the request, along with the amount of tokens to transfer.
  */
 pub async fn send_transaction_request(sender_private_key: String, recipient_public_key: String, amount: String ) {
     println!("Sending Transaction Request...");
@@ -145,11 +157,10 @@ pub async fn send_faucet_request(public_key: String)  {
 }
 
 /**
- * @notice send_block_consensus_request() asynchronously sends a request to all other validator nodes for their decision on whether or not to 
- * accept a new block into the blockchain. The function uses the hash of the request recieved by the client as a unique identifier in the request
- * sent to other nodes. Recieved responces will be handled by the main listener loop in validation module. Which will collect the responces and
- * stored them in the peer_consensus_decisions arc mutex hash map. These responces will accessed by the determine_majority() function to determine
- * the majority decision of the network.
+ * @notice send_block_consensus_request() asynchronously sends a request to all other validator nodes for their decision 
+ * on whether or not to accept a new block into the blockchain. The function uses the hash of the request recieved by the 
+ * client as a unique identifier in the request sent to other nodes. Recieved responces will be handled by the master event 
+ * handler in the network module. Once all are in, the client will proceed with determining a majority decision.
 */
 pub async fn send_consensus_request( request: Value, validator_node: ValidatorNode )  {
     println!("Sending request to peers for their independent decisions...");
@@ -175,8 +186,8 @@ pub async fn send_consensus_request( request: Value, validator_node: ValidatorNo
 
 
 /**
- * @notice send_peer_ledger_request() sends a request to all currently 
- * active nodes for a copy of their local ledger state.
+ * @notice send_peer_ledger_request() sends a request to all currently active nodes for a copy of their local ledger state.
+ * @dev This function is called when a new node joins the network and needs to sync its local ledger state with the rest of the network.
  */
 pub async fn send_peer_ledger_request(validator_node: ValidatorNode){
 

@@ -34,7 +34,7 @@ Peer nodes maintain a shared ledger state by individualy maintaining local copie
 
 To connect a node as a validator, run the following commmand:
 
-    cargo run validate [private key]
+    cargo run validate 
 
 This will caused the following chain of events:
 

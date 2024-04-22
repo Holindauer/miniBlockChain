@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
 use tokio::net::TcpStream;
 use tokio::io::AsyncWriteExt;
@@ -7,131 +6,44 @@ use sha2::{Digest, Sha256};
 use serde::{Serializer, Deserializer, Deserialize, Serialize};
 use serde::de::{self, Visitor, MapAccess};
 use serde::ser::SerializeMap;
-use base64::{encode, decode};
-use std::{fmt, collections::HashMap};
+use serde_json::Value;
 
-use serde_json::{Result as JsonResult, Value};
+use base64::{encode, decode};
+
+use std::{fmt, collections::HashMap};
+use std::sync::Arc;
 
 use crate::modules::validation::ValidatorNode;
 use crate::modules::blockchain::{BlockChain, Block};
 use crate::modules::merkle_tree::{MerkleTree, Account};
 use crate::modules::requests;
-use crate::modules::constants::PEER_STATE_RECEPTION_DURATION;
 
 
 /**
- * @notice chain_consensus.rs contains the logic for updating the local blockchain and merkle tree of a validator node
- * that is booting up to the majority state of the network. This is done by sending a request to all other validators
- * to send their current blockchain state. The node will then determine the majority state of the network and update
- * its local blockchain to reflect the majority.
+ * @notice adopt_network_state.rs contains the logic for validator nodes connecting to the network to adopt the majority
+ * ledger state of the network. This file contains the logic for sending a request to all other nodes for a copy of their
+ * blockchain, merkle tree, and all previously used zk-proofs. The validator node will wait for all peer responses (as per
+ * the time of the call to adopt_network_state()) and then determine the majority state of the network. The validator node
+ * will then update its local blockchain and merkle tree to reflect the majority state of the network.
 */
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct PeerLedgerResponse {
-    action: String,
-    blockchain: Vec<Block>,
-    accounts_vec: Vec<Account>,
-    #[serde(serialize_with = "serialize_account_balances_map", deserialize_with = "deserialize_account_balances_map")]
-    accounts_map: HashMap<Vec<u8>, u64>,
-    #[serde(serialize_with = "serialize_used_zk_proofs_map", deserialize_with = "deserialize_used_zk_proofs_map")]
-    used_zk_proofs: HashMap<Vec<u8>, Vec<String>>,
-}
 
 /**
  * @notice The PeerLedgerResponse struct is a serializable struct that is used to package the blockchain and merkle tree
  * data of a validator node. This struct is used to send the blockchain and merkle tree data to other validators when
  * they request it. The struct is also used to store the blockchain and merkle tree data of other validators when they
  * send it to this validator node.
+ * @dev the custom serialization functions are used because of the complexity of the HashMap fields in the struct. This
+ * allowes for calls to serde_json::to_string() and serde_json::from_str() to work as expected.
  */
-fn serialize_account_balances_map<S>(map: &HashMap<Vec<u8>, u64>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{   
-    // Encode the keys of the map to base64 before serialization
-    let map: HashMap<String, u64> = map
-        .iter()
-        .map(|(k, v)| (encode(k), *v))
-        .collect();
-    map.serialize(serializer)
-}
-
-/**
- * @notice The serialize_map() function is a custom serialization function that serializes the accounts_map field of the
- * PeerLedgerResponse struct. The accounts_map field is a HashMap with keys of type Vec<u8> and values of type u64. The
- * keys are base64 encoded before serialization to JSON to ensure that the keys are valid JSON strings.
- */
-fn deserialize_account_balances_map<'de, D>(deserializer: D) -> Result<HashMap<Vec<u8>, u64>, D::Error>
-where
-    D: Deserializer<'de>,
-{   
-    struct BytesMapVisitor;
-
-    impl<'de> Visitor<'de> for BytesMapVisitor {
-        type Value = HashMap<Vec<u8>, u64>;
-        
-        // Define the error type for the visitor
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("a map of base64 strings to u64 integers")
-        }
-        
-        // Deserialize the map
-        fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
-        where
-            M: de::MapAccess<'de>,
-        {   
-            // Create a new HashMap to store the deserialized map
-            let mut map: HashMap<Vec<u8>, u64> = HashMap::new();
-            while let Some((key, value)) = access.next_entry::<String, u64>()? {
-                map.insert(decode(&key).map_err(de::Error::custom)?, value);
-            }
-            Ok(map)
-        }
-    }
-
-    deserializer.deserialize_map(BytesMapVisitor)
-}
-
-
-// This function integrates the core logic directly for serialization.
-fn serialize_used_zk_proofs_map<S>(map: &HashMap<Vec<u8>, Vec<String>>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    let mut map_ser = serializer.serialize_map(Some(map.len()))?;
-    for (key, value) in map {
-        map_ser.serialize_entry(&encode(key), value)?;
-    }
-    map_ser.end()
-}
-
-// This structure and the associated impl will directly handle deserialization.
-struct UsedZkProofsVisitor;
-
-impl<'de> Visitor<'de> for UsedZkProofsVisitor {
-    type Value = HashMap<Vec<u8>, Vec<String>>;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a map of base64 strings to list of strings")
-    }
-
-    fn visit_map<M>(self, mut access: M) -> Result<HashMap<Vec<u8>, Vec<String>>, M::Error>
-    where
-        M: MapAccess<'de>,
-    {
-        let mut map = HashMap::new();
-        while let Some((key, value)) = access.next_entry::<String, Vec<String>>()? {
-            map.insert(decode(&key).map_err(de::Error::custom)?, value);
-        }
-        return Ok(map);
-    }
-}
-
-// This function integrates the core logic directly for deserialization.
-fn deserialize_used_zk_proofs_map<'de, D>(deserializer: D) -> Result<HashMap<Vec<u8>, Vec<String>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserializer.deserialize_map(UsedZkProofsVisitor)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PeerLedgerResponse {
+    action: String,
+    blockchain: Vec<Block>,
+    accounts_vec: Vec<Account>,
+    #[serde(serialize_with = "serialize_account_balances_map", deserialize_with = "deserialize_account_balances_map")] 
+    accounts_map: HashMap<Vec<u8>, u64>,
+    #[serde(serialize_with = "serialize_used_zk_proofs_map", deserialize_with = "deserialize_used_zk_proofs_map")]
+    used_zk_proofs: HashMap<Vec<u8>, Vec<String>>,
 }
 
 
@@ -149,14 +61,16 @@ pub async fn adopt_network_state(validator_node: ValidatorNode) {
     // Wait for all active peers to respond with their ledgers
     validator_node.await_all_peer_ledger_states_received().await;
 
-    // Determine the majority state of the network and 
-    // update the local blockchain and merkle tree
+    // Determine the majority state of the network and update the local blockchain and merkle tree
     adopt_majority(validator_node.clone()).await;
  }
 
+
 /**
- * @notice handle_peer_ledger_request() reciecves a serde_json::Value struct containing a request
- * for this node's copy of its's blockchain and 
+ * @notice handle_peer_ledger_request() is passed a serde_json::Value struct containing a request from the master 
+ * event handler in network.rs for a copy of this node's ledger state (blockchain, merkle tree, used zk proofs). 
+ * This function will package the blockchain and merkle tree data into a PeerLedgerResponse struct and send it back 
+ * to the requesting peer node.
  */
  pub async fn handle_peer_ledger_request(request: Value, validator_node: ValidatorNode)-> Result<(), Box<dyn std::error::Error>> {
 
@@ -177,7 +91,6 @@ pub async fn adopt_network_state(validator_node: ValidatorNode) {
     let accounts_vec: Vec<Account> = merkle_tree_guard.accounts_vec.clone();
     let accounts_map: HashMap<Vec<u8>, u64> = merkle_tree_guard.accounts_map.clone();
 
-
     // Package data into a PeerLedgerResponse struct
     let response: PeerLedgerResponse = PeerLedgerResponse {
         action: "PeerLedgerResponse".to_string(),
@@ -187,7 +100,7 @@ pub async fn adopt_network_state(validator_node: ValidatorNode) {
         used_zk_proofs
     };
 
-    // serialize the PeerLedgerResponse struct into a JSON string
+    // serialize the PeerLedgerResponse struct into a JSON string 
     let ledger_json: String = serde_json::to_string(&response).unwrap();
 
     // Retrieve response port from request
@@ -206,8 +119,6 @@ pub async fn adopt_network_state(validator_node: ValidatorNode) {
             }
             println!("Sent repsonse to conensus request to: {}", response_port); 
         },
-
-        // Print error message if connection fails
         Err(_) => { println!("Failed to connect to {}, There may not be a listener...", response_port); }
     }
 
@@ -215,10 +126,12 @@ pub async fn adopt_network_state(validator_node: ValidatorNode) {
  }
 
  /**
-  * @handle_peer_ledger_response() is a function that takes a serde_json::Value struct containing a response
-  * from a peer node that contains the blockchain and merkle tree data of the peer node. This function will
-  * store the data in the validator node's peer_ledger_state field for majority consensus determination once 
-  * the listening period has ended.
+  * @handle_peer_ledger_response() is passed the serde::json repsonse sent back by peers using handle_peer_ledger_request() 
+  * from all  that takes a serde_json::Value struct containing the blockchain, merkle tree, and used zk-proofs of the peer node. 
+  * This function will stores the data in the peer_ledger_state field of the client's ValidatorNode struct for majority consensus 
+  * determination once the listening period has ended.
+  * @dev As responses come in, the notify_all_ledgers_received field of the ValidatorNode struct is notified to check if all
+  * peers have responded. If all peers have responded, the adopt_majority() function is called to determine the majority state
   */
  pub async fn handle_peer_ledger_response(response: Value, validator_node: ValidatorNode)-> Result<(), Box<dyn std::error::Error>> {
 
@@ -241,11 +154,10 @@ pub async fn adopt_network_state(validator_node: ValidatorNode) {
  }
 
  /**
-  * @notice adopt_majority() is an asynchronous function that will determine the majority state of the collected
-  * peer_ledger_states and update the local blockchain and merkle tree of the validator node to reflect the majority
-  * state of the network. The majority is determine by hashing the blockchain and merkle tree data of each peer_ledger_state
-    * and counting the number of occurences of each hash using a hash map. The hash with the most occurences is considered 
-    the majority state.
+  * @notice adopt_majority() determines the majority state of the collected peer_ledger_states and update the local blockchain, 
+  * merkle tree, and used zk proofs of the validator node to reflect the majority state of the network. 
+  * @dev The majority is determine by hashing the blockchain and merkle tree data of each peer_ledger_state and counting the 
+  * number of occurences of each hash using a hash map. The hash with the most occurences is considered the majority state.
   */
   async fn adopt_majority(validator_node: ValidatorNode){
     println!("\nDetermining majority network state...");
@@ -254,22 +166,20 @@ pub async fn adopt_network_state(validator_node: ValidatorNode) {
     let peer_ledger_states: Arc<Mutex<Vec<PeerLedgerResponse>>> = validator_node.peer_ledger_states.clone();
     let peer_ledger_states_guard = peer_ledger_states.lock().await;
 
-    // If there are no peer_ledger_states to adopt, return
+    // If there are no peer_ledger_states to adopt, return (maintaining the empty local state)
     if peer_ledger_states_guard.is_empty() { 
         println!("No peer ledger states to adopt..."); 
         return; 
     }
 
-    // Create a hash map to store the hashes of the blockchain and merkle tree data of each peer_ledger_state
+    // HashMap to store the hashes of each ledger in each peer_ledger_state
     let mut ledger_hash_map: HashMap<Vec<u8>, u32> = HashMap::new();
 
     // Iterate through each peer_ledger_state and hash the blockchain and merkle tree data
     for peer_ledger_state in peer_ledger_states_guard.iter() {
 
-        // new SHA256 hasher
+        // hash the entire PeerLedgerResponse struct with a new SHA256 hasher
         let mut hasher = Sha256::new();
-
-        // hash the entire PeerLedgerResponse struct
         hasher.update(serde_json::to_string(&peer_ledger_state).unwrap());
         let hash: Vec<u8> = hasher.finalize().to_vec();
 
@@ -279,12 +189,12 @@ pub async fn adopt_network_state(validator_node: ValidatorNode) {
     }
 
     // Find the hash with the most occurences in the ledger_hash_map
-    let (majority_hash, majority_count) = ledger_hash_map.iter()
+    let (_, _) = ledger_hash_map.iter()
         .max_by_key(|entry| entry.1)
         .map(|(hash, count)| (hash.clone(), *count))
         .unwrap();  // Assuming there will be at least one entry
 
-    // Print the majority hash and count
+    // Find the peer_ledger_state with the majority hash
     let majority_peer_ledger_state = ledger_hash_map.iter()
         .max_by_key(|entry| entry.1)
         .and_then(|(hash, _)| {
@@ -320,6 +230,119 @@ pub async fn adopt_network_state(validator_node: ValidatorNode) {
     println!("\n\n--- Adopted majority network state ---\n\n");   
 }
 
+
+/**
+ * @notice The PeerLedgerResponse struct is a serializable struct that is used to package the blockchain and merkle tree
+ * data of a validator node. This struct is used to send the blockchain and merkle tree data to other validators when
+ * they request it. The struct is also used to store the blockchain and merkle tree data of other validators when they
+ * send it to this validator node.
+ */
+fn serialize_account_balances_map<S>(map: &HashMap<Vec<u8>, u64>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{   
+    // Encode the keys of the map to base64 before serialization
+    let map: HashMap<String, u64> = map
+        .iter()
+        .map(|(k, v)| (encode(k), *v))
+        .collect();
+    map.serialize(serializer)
+}
+
+/**
+ * @notice The serialize_map() function is a custom serialization function that serializes the accounts_map field of the
+ * PeerLedgerResponse struct. The accounts_map field is a HashMap with keys of type Vec<u8> and values of type u64. The
+ * keys are base64 encoded before serialization to JSON to ensure that the keys are valid JSON strings.
+ */
+fn deserialize_account_balances_map<'de, D>(deserializer: D) -> Result<HashMap<Vec<u8>, u64>, D::Error>
+where
+    D: Deserializer<'de>,
+{       
+    // Custom visitor for deserializing the accounts map
+    struct BytesMapVisitor;
+
+    // Implement the visitor trait for the custom visitor
+    impl<'de> Visitor<'de> for BytesMapVisitor {
+        type Value = HashMap<Vec<u8>, u64>;
+        
+        // Define the error type for the visitor
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a map of base64 strings to u64 integers")
+        }
+        
+        // Deserialize the map
+        fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+        where
+            M: de::MapAccess<'de>,
+        {   
+            // Create a new HashMap to store the deserialized map
+            let mut map: HashMap<Vec<u8>, u64> = HashMap::new();
+            while let Some((key, value)) = access.next_entry::<String, u64>()? {
+                map.insert(decode(&key).map_err(de::Error::custom)?, value);
+            }
+            Ok(map)
+        }
+    }
+
+    // call the visitor to deserialize the map
+    deserializer.deserialize_map(BytesMapVisitor)
+}
+
+
+/**
+ * @notice The serialize_used_zk_proofs_map() function is a custom serialization function that serializes the used_zk_proofs
+ * field of the PeerLedgerResponse struct. The used_zk_proofs field is a HashMap with keys of type Vec<u8> and values of type
+ * Vec<String>. The keys are base64 encoded before serialization to JSON to ensure that the keys are valid JSON strings.
+ */
+fn serialize_used_zk_proofs_map<S>(map: &HashMap<Vec<u8>, Vec<String>>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let mut map_ser = serializer.serialize_map(Some(map.len()))?;
+    for (key, value) in map {
+        map_ser.serialize_entry(&encode(key), value)?;
+    }
+    map_ser.end()
+}
+
+/**
+ * @notice The deserialize_used_zk_proofs_map() function is a custom deserialization function that deserializes the used_zk_proofs
+ * field of the PeerLedgerResponse struct. The used_zk_proofs field is a HashMap with keys of type Vec<u8> and values of type
+ * Vec<String>. The keys are base64 encoded and must be decoded before being inserted into the HashMap.
+ */
+fn deserialize_used_zk_proofs_map<'de, D>(deserializer: D) -> Result<HashMap<Vec<u8>, Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+
+    // Custom visitor for deserializing the used zk proofs map
+    struct UsedZkProofsVisitor;
+
+    // Implement the visitor trait for the custom visitor
+    impl<'de> Visitor<'de> for UsedZkProofsVisitor {
+        type Value = HashMap<Vec<u8>, Vec<String>>;
+
+        // error type for the visitor
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a map of base64 strings to list of strings")
+        }
+
+        // Deserialize the map
+        fn visit_map<M>(self, mut access: M) -> Result<HashMap<Vec<u8>, Vec<String>>, M::Error>
+        where
+            M: MapAccess<'de>,
+        {
+            let mut map = HashMap::new();
+            while let Some((key, value)) = access.next_entry::<String, Vec<String>>()? {
+                map.insert(decode(&key).map_err(de::Error::custom)?, value);
+            }
+            return Ok(map);
+        }
+    }
+
+    // call the visitor to deserialize the map
+    deserializer.deserialize_map(UsedZkProofsVisitor)
+}
 
 
 #[cfg(test)]

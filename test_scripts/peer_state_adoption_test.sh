@@ -49,7 +49,7 @@ for dir in "${saved_ledger_directories[@]}"; do
 done
 
 # Open a new terminal to run a validator node
-xterm -hold -e "bash -c 'cargo run validate private_key'" &
+xterm -hold -e "bash -c 'cargo run validate'" &
 
 # Wait for the validator node to initialize and start
 sleep 5
@@ -102,17 +102,17 @@ cargo run transaction "$secret_key_1" "$public_key_2" 50
 
 # Open a new terminal to run additional validator nodes (theere is a consensus of 1, if thre nodes 
 # connect at the same time the network will adopt the initial state of the three nodes)
-xterm -hold -e "bash -c 'cargo run validate private_key'" &
+xterm -hold -e "bash -c 'cargo run validate'" &
 
 sleep 7
 
 # connect two more nodes, the majority of  he two synced nodes from above 2 will be adoped by these nodes
-xterm -hold -e "bash -c 'cargo run validate private_key'" &
+xterm -hold -e "bash -c 'cargo run validate'" &
 
 # wait for the adoption of the network state
 sleep 7
 
-xterm -hold -e "bash -c 'cargo run validate private_key'" &
+xterm -hold -e "bash -c 'cargo run validate'" &
 
 # Wait for the adoption of the network state
 sleep 7

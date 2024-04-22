@@ -89,8 +89,7 @@ async fn main() -> std::io::Result<()> {
  
     }// Run Validation Node Specified 
     else if args[1] == "validate" { 
-        let private_key: &String = &args[2];
-        validation::run_validation(private_key).await;
+        validation::run_validation().await;
 
     } // Faucet Request Specified
     else if args[1] == "faucet"  {

@@ -16,7 +16,7 @@ use serde::{Serialize, Deserialize};
 
  
 /**
- * @notice Account struct represents a single account in the blockchain.
+ * @notice Account struct stores a single account in the blockchain.
  * @param public_key - the public key of the account as a vector of bytes.
  * @param balance - the balance of the account.
  * @param nonce - the nonce of the account (amount of transactions sent from this account).
@@ -301,8 +301,6 @@ mod tests {
         // create a new MerkleTree instance
         let mut tree = MerkleTree::new(); 
         
-
-
         // mock account data
         let account = Account { // create a new Account instance w/ mock data
             public_key: vec![1, 2, 3, 4],
