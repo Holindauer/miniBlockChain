@@ -186,9 +186,14 @@ If these are all true, the client decision is to validate and a request for cons
             Amount: 50
             Time: 1713547728
             Hash: 55442950180c4e60b9583a8cbe154ad2bb03337f430d9d8b97aeee4f5c6d4646
-    
 
-## Integration Testing Dependencies 
+
+## Integration Testing
+To run all integration tests, run the follwoing command:
+
+        ./run_integration_tests.sh
+
+Make sure to have the following dependencies installed
 
     xterm
     jq
