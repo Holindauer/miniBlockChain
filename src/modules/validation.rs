@@ -279,16 +279,16 @@ async fn verify_account_creation_independently( request: Value, validator_node: 
 async fn add_account_creation_to_ledger( request: Value, validator_node: ValidatorNode ) {
     println!("Adding Account Creation to Local Ledger...");
 
-    // Retrieve public key and obfuscated private key hash from request
+    // Retrieve public key and public key hash from request
     let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
-    let obfuscated_private_key_hash: Vec<u8> = hex::decode(request["obfuscated_private_key_hash"].as_str().unwrap_or_default()).unwrap();
+    let public_key_hash: Vec<u8> = hex::decode(request["public_key_hash"].as_str().unwrap_or_default()).unwrap();
 
     // Lock merkle tree for writing
     let merkel_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
     let mut merkel_tree_guard: MutexGuard<MerkleTree> = merkel_tree.lock().await;
 
     // Package account details in merkle_tree::Account struct and insert into merkle tree
-    let account = Account { public_key: public_key.clone(), obfuscated_private_key_hash,  balance: 0, nonce: 0,};
+    let account = Account { public_key: public_key.clone(), public_key_hash,  balance: 0, nonce: 0,};
 
     // Insert the account into the merkle tree
     merkel_tree_guard.insert_account(account);
@@ -390,15 +390,27 @@ async fn verify_transaction_independently(request: Value, validator_node: Valida
     else if  merkle_tree_guard.account_exists(recipient_address.clone()) != true { 
         decision = false;
     }
-    // Reject decision if the zk-proof fails
-    else if zk_proof::verify_points_sum_hash(
-        &request["encoded_key_curve_point_1"].as_str().unwrap_or_default().to_string(),
-        &request["encoded_key_curve_point_2"].as_str().unwrap_or_default().to_string(),
-        merkle_tree_guard.get_private_key_hash(sender_address.clone()).unwrap(),
-        sender_address.clone(),
-        validator_node.clone()
-    ).await != true { 
-        decision = false; 
+    // Reject decision if the signature verification fails
+    else if {
+        let signature = request["signature"].as_str().unwrap_or_default();
+        let sender_public_key = request["sender_public_key"].as_str().unwrap_or_default();
+        let recipient_public_key = request["recipient_public_key"].as_str().unwrap_or_default();
+        let amount = request["amount"].as_str().unwrap_or_default();
+        let _nonce = request["nonce"].as_u64().unwrap_or_default();
+        
+        // Get the actual nonce from the merkle tree
+        let actual_nonce = merkle_tree_guard.get_nonce(sender_address.clone()).unwrap_or(0);
+        
+        !zk_proof::verify_transaction_signature(
+            signature,
+            sender_public_key,
+            recipient_public_key,
+            amount,
+            actual_nonce,
+            validator_node.clone()
+        ).await
+    } {
+        decision = false;
     }
     // Reject decision if the sender does not have enough balance to send the transaction
     else if transaction_amount > merkle_tree_guard.get_account_balance(sender_address.clone()).unwrap(){

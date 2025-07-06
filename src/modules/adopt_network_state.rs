@@ -370,7 +370,7 @@ mod tests {
             accounts_vec: vec![
                 Account {
                     public_key: vec![1, 2, 3],
-                    obfuscated_private_key_hash: vec![4, 5, 6],
+                    public_key_hash: vec![4, 5, 6],
                     balance: 1000,
                     nonce: 0,
                 },

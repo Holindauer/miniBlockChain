@@ -1,4 +1,3 @@
-use curve25519_dalek::ristretto::RistrettoPoint;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use serde::{Serialize, Deserialize};
@@ -10,7 +9,6 @@ use secp256k1::{SecretKey, PublicKey};
 extern crate rand;
 use crate::modules::constants::INTEGRATION_TEST;
 extern crate hex;
-use base64;
 
 use crate::modules::zk_proof;
 use crate::modules::network::NetworkConfig;
@@ -38,14 +36,14 @@ use crate::modules::validation::ValidatorNode;
  pub enum NetworkRequest {
      AccountCreation {
          public_key: String,
-         obfuscated_private_key_hash: String,
+         public_key_hash: String,
      },
      Transaction {
          sender_public_key: String,
-         encoded_key_curve_point_1: String,
-         encoded_key_curve_point_2: String,
+         signature: String,
          recipient_public_key: String,
          amount: String,
+         nonce: u64,
      },
      Faucet {
          public_key: String,
@@ -83,14 +81,13 @@ pub async fn send_account_creation_request(){
     // Generate a new keypair
     let (secret_key, public_key) = zk_proof::generate_keypair().unwrap();
 
-    // Obfuscate the private key for zk-proof
-    let obscured_private_key: RistrettoPoint = zk_proof::obfuscate_private_key(secret_key);
-    let obfuscated_private_key_hash: Vec<u8> = zk_proof::hash_obfuscated_private_key(obscured_private_key);
+    // Hash the public key for storage
+    let public_key_hash: Vec<u8> = zk_proof::get_public_key_hash(&public_key);
 
     // Package account creation request
     let request = NetworkRequest::AccountCreation {
         public_key: public_key.to_string(),
-        obfuscated_private_key_hash: hex::encode(obfuscated_private_key_hash),
+        public_key_hash: hex::encode(public_key_hash),
     };
 
     // Serialize request to JSON
@@ -110,10 +107,8 @@ pub async fn send_account_creation_request(){
  /**
  * @notice send_transcation_request() sends a request to the network to transfer a given amount of tokens from one account to another.
  * The request includes the public key of the sender, the public key of the recipient, and the amount of tokens to transfer.
- * @dev The sender's private key is used to derive the sender's public key, which is included in the request. The sender's private key
- * is also used to generate two elliptic curve points, which are base64 encoded and included in the request. These curve points are 
- * used as a zk-proof that when added together, should match the curve point stored in the merkle tree for the sender account. 
- * The recipient's public key is included in the request, along with the amount of tokens to transfer.
+ * @dev The sender's private key is used to derive the sender's public key and sign the transaction.
+ * The signature proves ownership of the private key without revealing it.
  */
 pub async fn send_transaction_request(sender_private_key: String, recipient_public_key: String, amount: String ) {
     println!("Sending Transaction Request...");
@@ -121,20 +116,25 @@ pub async fn send_transaction_request(sender_private_key: String, recipient_publ
     // derive the public key from the private key
     let sender_public_key: String = zk_proof::derive_public_key_from_private_key(&sender_private_key);
 
-    // Convert the private key to two RistrettoPoints (elliptic curve points)
-    let (point1, point2) = zk_proof::private_key_to_curve_points(&sender_private_key);
+    // For simplicity, use nonce 0. In production, this should be fetched from the network
+    let nonce: u64 = 0;
 
-    // Base64 encode the points to send over the network
-    let encoded_key_point_1: String = base64::encode(point1.compress().to_bytes());
-    let encoded_key_point_2: String = base64::encode(point2.compress().to_bytes());
+    // Sign the transaction
+    let signature = zk_proof::sign_transaction(
+        &sender_private_key,
+        &sender_public_key,
+        &recipient_public_key,
+        &amount,
+        nonce
+    ).expect("Failed to sign transaction");
 
     // Package the message
     let request = NetworkRequest::Transaction {
         sender_public_key,
-        encoded_key_curve_point_1: encoded_key_point_1,
-        encoded_key_curve_point_2: encoded_key_point_2,
+        signature,
         recipient_public_key,
         amount,
+        nonce,
     };
     let request_json: String = serde_json::to_string(&request).unwrap();    
 

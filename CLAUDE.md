@@ -55,7 +55,7 @@ cargo run transaction [sender_private_key] [recipient_public_key] [amount]  # Se
 
 5. **Merkle Tree (merkle_tree.rs)**: Hybrid HashMap + Tree structure for O(1) balance lookups with cryptographic verification. Tracks account nonces for replay protection.
 
-6. **Zero-Knowledge Proofs (zk_proof.rs)**: Uses Curve25519 for proving private key ownership without revealing the key. Prevents proof reuse attacks.
+6. **Digital Signatures (zk_proof.rs)**: Uses ECDSA signatures with secp256k1 for transaction authentication. Prevents signature reuse attacks.
 
 ### Data Flow
 ```
@@ -82,6 +82,7 @@ Integration tests spawn multiple validator nodes in xterm windows, perform opera
 ### Important Implementation Details
 - Validator nodes persist state to `Node_[address]:[port]/` directories
 - Consensus requires majority agreement from active peers
-- Zero-knowledge proofs are tracked to prevent reuse
+- Digital signatures are tracked to prevent reuse
 - Faucet distributes 100 tokens per request
 - Validators receive 1 token reward per validated transaction
+- Transactions include nonce to prevent replay attacks
