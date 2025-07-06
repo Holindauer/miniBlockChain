@@ -72,34 +72,39 @@ impl MerkleTree {
     }
 
     // Retrieves account balance from accountsMap public key
-    pub fn get_account_balance(&self, public_key: Vec<u8>) -> Option<u64> {
-        self.accounts_map.get(&public_key).cloned()
+    pub fn get_account_balance(&self, public_key: &[u8]) -> Option<u64> {
+        self.accounts_map.get(public_key).copied()
     }
 
     // Returns an accounts public key hash
-    pub fn get_public_key_hash(&self, public_key: Vec<u8>) -> Option<Vec<u8>> {
+    pub fn get_public_key_hash(&self, public_key: &[u8]) -> Option<Vec<u8>> {
         self.accounts_vec.iter().find(|account| account.public_key == public_key).map(|account| account.public_key_hash.clone())
     }
 
     // Returns the nonce of a specific public key
-    pub fn get_nonce(&self, public_key: Vec<u8>) -> Option<u64> {
+    pub fn get_nonce(&self, public_key: &[u8]) -> Option<u64> {
         self.accounts_vec.iter().find(|account| account.public_key == public_key).map(|account| account.nonce)
     }
     
     // Checks if an account exists
-    pub fn account_exists(&self, public_key: Vec<u8>) -> bool {
-        self.accounts_map.contains_key(&public_key)
+    pub fn account_exists(&self, public_key: &[u8]) -> bool {
+        self.accounts_map.contains_key(public_key)
     }
 
     // Changes the balance of an account
-    pub fn change_balance(&mut self, public_key: Vec<u8>, new_balance: u64) {
-        if let Some(balance) = self.accounts_map.get_mut(&public_key) {
+    pub fn change_balance(&mut self, public_key: &[u8], new_balance: u64) {
+        if let Some(balance) = self.accounts_map.get_mut(public_key) {
             *balance = new_balance;
+        }
+        
+        // Also update in the vector
+        if let Some(account) = self.accounts_vec.iter_mut().find(|a| a.public_key == public_key) {
+            account.balance = new_balance;
         }
     }
 
     // Increments the nonce of an account
-    pub fn increment_nonce(&mut self, public_key: Vec<u8>) {
+    pub fn increment_nonce(&mut self, public_key: &[u8]) {
         if let Some(account) = self.accounts_vec.iter_mut().find(|account| account.public_key == public_key) {
             account.nonce += 1;
         }
@@ -209,7 +214,7 @@ mod tests {
         tree.insert_account(account.clone());  // add the account to the tree
 
         // ensure the account balance can be retrieved correctly
-        let balance = tree.get_account_balance(account.public_key.clone()).unwrap();
+        let balance = tree.get_account_balance(&account.public_key).unwrap();
         assert_eq!(balance, account.balance);
     }
 
@@ -251,7 +256,7 @@ mod tests {
         };
 
         tree.insert_account(account.clone());
-        assert!(tree.account_exists(account.public_key.clone()));
+        assert!(tree.account_exists(&account.public_key));
     }
 
     #[test]

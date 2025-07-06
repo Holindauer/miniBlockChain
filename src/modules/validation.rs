@@ -231,7 +231,7 @@ pub async fn handle_account_creation_request( request: Value, validator_node: Va
     println!("Majority Decision: {}", peer_majority_decision);
 
     // return error if network consensus not reached
-    if (peer_majority_decision == false) { return Err("invalid request".to_string());}
+    if peer_majority_decision == false { return Err("invalid request".to_string());}
 
     // add the account to the ledger
     add_account_creation_to_ledger(request.clone() ,validator_node.clone()).await;
@@ -257,7 +257,7 @@ async fn verify_account_creation_independently( request: Value, validator_node: 
 
     // make decision upone whether the account already exist in the tree
     let decision: bool;
-    if merkle_tree_guard.account_exists(public_key.clone()) { decision = false; }else { decision = true; }
+    if merkle_tree_guard.account_exists(&public_key) { decision = false; }else { decision = true; }
     println!("Client decision: {}", decision);
 
     // use SHA256 to hash the request
@@ -292,7 +292,7 @@ async fn add_account_creation_to_ledger( request: Value, validator_node: Validat
 
     // Insert the account into the merkle tree
     merkel_tree_guard.insert_account(account);
-    assert!(merkel_tree_guard.account_exists(public_key.clone()));
+    assert!(merkel_tree_guard.account_exists(&public_key));
 
     // Get time of account creation
     let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
@@ -347,7 +347,7 @@ pub async fn handle_transaction_request(request: Value, validator_node: Validato
     println!("Majority Decision: {}", peer_majority_decision);
 
     // return false if network consensus not reached
-    if (peer_majority_decision == false) { return Ok(false);}
+    if peer_majority_decision == false { return Ok(false);}
 
     // add the transaction to the ledger
     add_transaction_to_ledger(request.clone(), validator_node.clone()).await;
@@ -366,28 +366,28 @@ pub async fn handle_transaction_request(request: Value, validator_node: Validato
 async fn verify_transaction_independently(request: Value, validator_node: ValidatorNode)-> bool {
     println!("Performing Independent Validation of Transaction Request...");
   
-    // retrieve request information
-    let sender_address: Vec<u8> = request["sender_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
-    let recipient_address: Vec<u8> = request["recipient_public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
+    // retrieve request information (avoid unnecessary allocations)
+    let sender_key_str = request["sender_public_key"].as_str().unwrap_or_default();
+    let sender_address: Vec<u8> = sender_key_str.as_bytes().to_vec();
+    let recipient_key_str = request["recipient_public_key"].as_str().unwrap_or_default();
+    let recipient_address: Vec<u8> = recipient_key_str.as_bytes().to_vec();
     let transaction_amount: u64 = request["amount"].as_str().unwrap_or_default().parse().unwrap_or_default();
  
     // lock client decisions map
-    let client_decisions: Arc<Mutex<HashMap<Vec<u8>, bool>>> = validator_node.client_decisions.clone();
-    let mut client_decisions_guard: MutexGuard<HashMap<Vec<u8>, bool>> = client_decisions.lock().await;
+    let mut client_decisions_guard: MutexGuard<HashMap<Vec<u8>, bool>> = validator_node.client_decisions.lock().await;
 
     // Lock the merkle tree while accessing sender account info
-    let merkle_tree: Arc<Mutex<MerkleTree>> = validator_node.merkle_tree.clone();
-    let merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
+    let merkle_tree_guard: MutexGuard<MerkleTree> = validator_node.merkle_tree.lock().await;
 
     // declare decision
     let decision: bool;
 
     // Reject decision if the sender account does not exist in the merkle tree
-    if  merkle_tree_guard.account_exists(sender_address.clone()) != true { 
+    if !merkle_tree_guard.account_exists(&sender_address) { 
         decision = false;
     }
      // Reject decision if the recipient account does not exist in the merkle tree
-    else if  merkle_tree_guard.account_exists(recipient_address.clone()) != true { 
+    else if !merkle_tree_guard.account_exists(&recipient_address) { 
         decision = false;
     }
     // Reject decision if the signature verification fails
@@ -399,7 +399,7 @@ async fn verify_transaction_independently(request: Value, validator_node: Valida
         let _nonce = request["nonce"].as_u64().unwrap_or_default();
         
         // Get the actual nonce from the merkle tree
-        let actual_nonce = merkle_tree_guard.get_nonce(sender_address.clone()).unwrap_or(0);
+        let actual_nonce = merkle_tree_guard.get_nonce(&sender_address).unwrap_or(0);
         
         !zk_proof::verify_transaction_signature(
             signature,
@@ -413,7 +413,7 @@ async fn verify_transaction_independently(request: Value, validator_node: Valida
         decision = false;
     }
     // Reject decision if the sender does not have enough balance to send the transaction
-    else if transaction_amount > merkle_tree_guard.get_account_balance(sender_address.clone()).unwrap(){
+    else if transaction_amount > merkle_tree_guard.get_account_balance(&sender_address).unwrap(){
         decision = false;
     }
     // Accept decision if all checks pass
@@ -448,20 +448,20 @@ async fn add_transaction_to_ledger(request: Value, validator_node: ValidatorNode
     let mut merkle_tree_guard: MutexGuard<MerkleTree> = merkle_tree.lock().await;
 
     // retrieve the sender and recipient balances from the merkle tree
-    let mut sender_balance: u64 = merkle_tree_guard.get_account_balance(sender_address.clone()).unwrap();
-    let mut recipient_balance: u64 = merkle_tree_guard.get_account_balance(recipient_address.clone()).unwrap();
+    let mut sender_balance: u64 = merkle_tree_guard.get_account_balance(&sender_address).unwrap();
+    let mut recipient_balance: u64 = merkle_tree_guard.get_account_balance(&recipient_address).unwrap();
 
     // retrieve the sender's nonce and the current time
-    let sender_nonce: u64 = merkle_tree_guard.get_nonce(sender_address.clone()).unwrap();
+    let sender_nonce: u64 = merkle_tree_guard.get_nonce(&sender_address).unwrap();
     let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
     // determine new account balances
     sender_balance -= amount; recipient_balance += amount;
 
     // Change account balances in the merkle tree to the ones updated
-    merkle_tree_guard.change_balance(sender_address.clone(), sender_balance);
-    merkle_tree_guard.increment_nonce(sender_address.clone());
-    merkle_tree_guard.change_balance(recipient_address.clone(), recipient_balance);
+    merkle_tree_guard.change_balance(&sender_address, sender_balance);
+    merkle_tree_guard.increment_nonce(&sender_address);
+    merkle_tree_guard.change_balance(&recipient_address, recipient_balance);
     
     // Package request details in Request enum 
     let new_account_request = Block::Transaction {  // TODO this could probably be replaced by the block struct itself
@@ -529,7 +529,7 @@ pub async fn handle_faucet_request(request: Value, validator_node: ValidatorNode
     ).await;
 
     // return error if network consensus not reached
-    if (peer_majority_decision == false) { return Ok(()); }
+    if peer_majority_decision == false { return Ok(()); }
 
     // add the faucet request to the ledger
     add_faucet_request_to_ledger(request.clone(), validator_node.clone()).await;
@@ -554,7 +554,7 @@ async fn verify_faucet_request_independently(request: Value, validator_node: Val
 
     // Check that the account doesnt already exist in the tree
     let decision: bool;
-    if !merkle_tree_guard.account_exists(public_key.clone()) { decision = false } else { decision = true; }
+    if !merkle_tree_guard.account_exists(&public_key) { decision = false } else { decision = true; }
     
     // use SHA256 to hash the request
     let client_request_hash: Vec<u8> = network::hash_network_request(request).await;
@@ -586,11 +586,11 @@ async fn add_faucet_request_to_ledger(request: Value, validator_node: ValidatorN
     let public_key: Vec<u8> = request["public_key"].as_str().unwrap_or_default().as_bytes().to_vec();
 
     // get the account balance and update it
-    let account_balance: u64 = merkle_tree_guard.get_account_balance(public_key.clone()).unwrap();
+    let account_balance: u64 = merkle_tree_guard.get_account_balance(&public_key).unwrap();
     let new_balance: u64 = account_balance + FAUCET_AMOUNT;
 
     // update the account balance
-    merkle_tree_guard.change_balance(public_key.clone(), new_balance);
+    merkle_tree_guard.change_balance(&public_key, new_balance);
 
     // Update the blockchain with the faucet request
     let time: u64 = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();

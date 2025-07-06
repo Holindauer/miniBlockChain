@@ -166,26 +166,26 @@ impl BlockChain {
     
         match block { // Contribute block to hasher based on its type
             Block::Genesis { time, .. } => {
-                hasher.update(time.to_string().as_bytes());
+                hasher.update(&time.to_le_bytes());
             }
             Block::Transaction { sender, sender_balance, recipient, recipient_balance, amount, time, sender_nonce, .. } => {
                 hasher.update(sender);
-                hasher.update(&sender_balance.to_be_bytes());
+                hasher.update(&sender_balance.to_le_bytes());
                 hasher.update(recipient);
-                hasher.update(&recipient_balance.to_be_bytes());
-                hasher.update(&amount.to_be_bytes());
-                hasher.update(time.to_string().as_bytes());
-                hasher.update(sender_nonce.to_string().as_bytes());
+                hasher.update(&recipient_balance.to_le_bytes());
+                hasher.update(&amount.to_le_bytes());
+                hasher.update(&time.to_le_bytes());
+                hasher.update(&sender_nonce.to_le_bytes());
             }
             Block::NewAccount { address, account_balance, time, .. } => {
                 hasher.update(address);
-                hasher.update(&account_balance.to_string().as_bytes());
-                hasher.update(time.to_string().as_bytes());
+                hasher.update(&account_balance.to_le_bytes());
+                hasher.update(&time.to_le_bytes());
             }
             Block::Faucet { address, account_balance, time, .. } => {
                 hasher.update(address);
-                hasher.update(account_balance.to_string().as_bytes());
-                hasher.update(time.to_string().as_bytes());
+                hasher.update(&account_balance.to_le_bytes());
+                hasher.update(&time.to_le_bytes());
             }
         }
         
@@ -213,7 +213,7 @@ impl BlockChain {
             // Contribute block to hasher based on its type
             match block {
                 Block::Genesis { time } => {
-                    hasher.update(time.to_string().as_bytes());
+                    hasher.update(&time.to_le_bytes());
                 }
                 Block::Transaction { sender, sender_balance, recipient, recipient_balance, amount, time, sender_nonce, hash  } => {
                     hasher.update(sender);
@@ -221,20 +221,20 @@ impl BlockChain {
                     hasher.update(recipient);
                     hasher.update(&recipient_balance.to_be_bytes());
                     hasher.update(&amount.to_be_bytes());
-                    hasher.update(time.to_string().as_bytes());
-                    hasher.update(sender_nonce.to_string().as_bytes());
+                    hasher.update(&time.to_le_bytes());
+                    hasher.update(&sender_nonce.to_le_bytes());
                     hasher.update(hash);
                 }
                 Block::NewAccount { address, account_balance, time, hash } => {
                     hasher.update(address);
-                    hasher.update(&account_balance.to_string().as_bytes());
-                    hasher.update(time.to_string().as_bytes());
+                    hasher.update(&account_balance.to_le_bytes());
+                    hasher.update(&time.to_le_bytes());
                     hasher.update(hash);
                 }
                 Block::Faucet { address, account_balance, time, hash } => {
                     hasher.update(address);
-                    hasher.update(account_balance.to_string().as_bytes());
-                    hasher.update(time.to_string().as_bytes());
+                    hasher.update(&account_balance.to_le_bytes());
+                    hasher.update(&time.to_le_bytes());
                     hasher.update(hash);
                 }
             }

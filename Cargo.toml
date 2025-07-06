@@ -17,3 +17,10 @@ curve25519-dalek = "3.0"
 base64 = "0.13.0"
 rand = "0.8" # Use the latest version
 rand_core = "0.6" # Use the latest version
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "blockchain_benchmarks"
+harness = false

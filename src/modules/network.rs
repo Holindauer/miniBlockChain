@@ -100,9 +100,9 @@ pub async fn start_listening(validator_node: ValidatorNode) {
     validator_node.client_port_address = client_port_address.clone();
 
     // clone mutable validator node structs for use in the 3 below spawned tasks
-    let mut validator_node_clone_1: ValidatorNode = validator_node.clone();
-    let mut validator_node_clone_2: ValidatorNode = validator_node.clone();
-    let mut validator_node_clone_3: ValidatorNode = validator_node.clone();
+    let validator_node_clone_1: ValidatorNode = validator_node.clone();
+    let validator_node_clone_2: ValidatorNode = validator_node.clone();
+    let validator_node_clone_3: ValidatorNode = validator_node.clone();
 
     // Spawn a task for sending heartbeat signals 
     tokio::spawn(async move {
