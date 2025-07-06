@@ -172,10 +172,7 @@ impl MerkleTree {
 
 #[cfg(test)]
 mod tests {
-    use std::hash::Hash;
-
     use super::*;
-    use serde_json::Value;
     
     /**
      * @test test_insert_account() is a test function that checks the insert_account() method of the MerkleTree struct.
@@ -288,9 +285,8 @@ mod tests {
 
     /**
      * @test test_serialize_deserialize_merkle_tree() is a test function that checks the
-     * serialization and deserialization of the components of theMerkleTree struct. that 
-     * are extracted and serialized during the peer ledger state adoption when a valildator
-     * node is first connected to the network.
+     * serialization and deserialization of the Account struct which is the main component
+     * that needs to be serialized during peer ledger state adoption.
      */
     #[test]
     fn test_serialize_deserialize_merkle_tree() {
@@ -299,7 +295,7 @@ mod tests {
         let mut tree = MerkleTree::new(); 
         
         // mock account data
-        let account = Account { // create a new Account instance w/ mock data
+        let account = Account {
             public_key: vec![1, 2, 3, 4],
             public_key_hash: vec![1, 2, 3, 4],
             balance: 100,
@@ -307,25 +303,25 @@ mod tests {
         };  
 
         // insert account into the tree
-        let account: Account = account.clone();
-        tree.insert_account(account);
+        tree.insert_account(account.clone());
 
-        // Retrieve the accounts vec and map from the tree
+        // Retrieve the accounts vec from the tree
         let accounts_vec: Vec<Account> = tree.accounts_vec.clone();
-        let accounts_map: HashMap<Vec<u8>, u64> = tree.accounts_map.clone();
 
-
-        // Serialize the two components
+        // Serialize the accounts vector
         let accounts_vec_serialized: String = serde_json::to_string(&accounts_vec).unwrap();
-        let accounts_map_serialized: String = serde_json::to_string(&accounts_map).unwrap();
 
-        // Deserialize the two components
+        // Deserialize the accounts vector
         let accounts_vec_deserialized: Vec<Account> = serde_json::from_str(&accounts_vec_serialized).unwrap();
-        let accounts_map_deserialized: HashMap<Vec<u8>, u64> = serde_json::from_str(&accounts_map_serialized).unwrap();
 
-        // Ensure the deserialized components are equal to the original components
-        // assert_eq!(accounts_vec, accounts_vec_deserialized);
-        // assert_eq!(accounts_map, accounts_map_deserialized);
+        // Ensure the deserialized accounts are equal to the original
+        assert_eq!(accounts_vec, accounts_vec_deserialized);
+        assert_eq!(accounts_vec_deserialized.len(), 1);
+        assert_eq!(accounts_vec_deserialized[0].balance, 100);
+        assert_eq!(accounts_vec_deserialized[0].nonce, 1);
         
+        // Note: The accounts_map serialization is handled by custom serializers in
+        // adopt_network_state.rs since HashMap<Vec<u8>, u64> cannot be directly
+        // serialized to JSON (byte arrays can't be JSON object keys)
     }
 }
