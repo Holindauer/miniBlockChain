@@ -11,6 +11,7 @@ use tokio::sync::{Mutex, MutexGuard};
 
 
 use crate::modules::validation::ValidatorNode;
+use crate::modules::utxo::{UTXOTransaction, CoinbaseTransaction};
 
 /**
  * @notice blockchain.rs contains the structs and methods for creating and manipulating blocks in the blockchain.
@@ -27,6 +28,8 @@ use crate::modules::validation::ValidatorNode;
   * @param Transaction - a block that contains the data of a single transaction between two users.
   * @param NewAccount - a block that contains the data of a new account creation
   * @param Faucet - a block that contains the data of a faucet transaction.
+  * @param UTXOTransaction - a block that contains a UTXO-based transaction
+  * @param Coinbase - a block that creates new tokens (mining reward)
 */
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)] 
 pub enum Block {
@@ -53,6 +56,15 @@ pub enum Block {
         address: Vec<u8>, 
         account_balance: u64,
         time: u64, 
+        hash: Vec<u8>
+    },
+    UTXOTransaction {
+        transaction: UTXOTransaction,
+        block_height: u64,
+        hash: Vec<u8>
+    },
+    Coinbase {
+        transaction: CoinbaseTransaction,
         hash: Vec<u8>
     }
 }
@@ -120,6 +132,22 @@ impl BlockChain {
             Block::Transaction { sender, .. } => sender,
             Block::NewAccount { address, .. } => address,
             Block::Faucet { address, .. } => address,
+            Block::UTXOTransaction { transaction, .. } => {
+                // For UTXO transactions, use the first input's public key as the identifier
+                if !transaction.inputs.is_empty() {
+                    &transaction.inputs[0].public_key
+                } else {
+                    panic!("UTXO transaction must have at least one input")
+                }
+            },
+            Block::Coinbase { transaction, .. } => {
+                // For coinbase transactions, use the first output's recipient as identifier
+                if !transaction.outputs.is_empty() {
+                    &transaction.outputs[0].recipient
+                } else {
+                    panic!("Coinbase transaction must have at least one output")
+                }
+            },
             Block::Genesis { .. } => panic!("Invalid request type"),
         }.clone();
     
@@ -140,6 +168,20 @@ impl BlockChain {
             Block::Transaction { sender, .. } => sender,
             Block::NewAccount { address, .. } => address,
             Block::Faucet { address, .. } => address,
+            Block::UTXOTransaction { transaction, .. } => {
+                if !transaction.inputs.is_empty() {
+                    &transaction.inputs[0].public_key
+                } else {
+                    panic!("UTXO transaction must have at least one input")
+                }
+            },
+            Block::Coinbase { transaction, .. } => {
+                if !transaction.outputs.is_empty() {
+                    &transaction.outputs[0].recipient
+                } else {
+                    panic!("Coinbase transaction must have at least one output")
+                }
+            },
             _ => panic!("Invalid request type"),
         }.clone();
 
@@ -187,6 +229,13 @@ impl BlockChain {
                 hasher.update(&account_balance.to_le_bytes());
                 hasher.update(&time.to_le_bytes());
             }
+            Block::UTXOTransaction { transaction, block_height, .. } => {
+                hasher.update(&transaction.hash);
+                hasher.update(&block_height.to_le_bytes());
+            }
+            Block::Coinbase { transaction, .. } => {
+                hasher.update(&transaction.hash);
+            }
         }
         
         // Finalize the hash and return it as Vec<u8>
@@ -194,7 +243,11 @@ impl BlockChain {
         
         // Set the hash in the block
         match block {
-            Block::Transaction { hash: block_hash, .. } | Block::NewAccount { hash: block_hash, .. } => {
+            Block::Transaction { hash: block_hash, .. } | 
+            Block::NewAccount { hash: block_hash, .. } | 
+            Block::Faucet { hash: block_hash, .. } |
+            Block::UTXOTransaction { hash: block_hash, .. } |
+            Block::Coinbase { hash: block_hash, .. } => {
                 *block_hash = hash.clone();
             }
             _ => (),
@@ -237,6 +290,15 @@ impl BlockChain {
                     hasher.update(&time.to_le_bytes());
                     hasher.update(hash);
                 }
+                Block::UTXOTransaction { transaction, block_height, hash } => {
+                    hasher.update(&transaction.hash);
+                    hasher.update(&block_height.to_le_bytes());
+                    hasher.update(hash);
+                }
+                Block::Coinbase { transaction, hash } => {
+                    hasher.update(&transaction.hash);
+                    hasher.update(hash);
+                }
             }
         }
 
@@ -275,6 +337,15 @@ pub enum BlockJson {
         address: String, 
         account_balance: u64,
         time: u64, 
+        hash: String
+    },
+    UTXOTransaction {
+        transaction: UTXOTransaction,
+        block_height: u64,
+        hash: String
+    },
+    Coinbase {
+        transaction: CoinbaseTransaction,
         hash: String
     }
 }
@@ -371,6 +442,18 @@ async fn convert_block_to_blockjson(block: Block) -> BlockJson {
             // package faucet block data into BlockJson
             block_json = BlockJson::Faucet { address, account_balance, time, hash };
         },
+        Block::UTXOTransaction { transaction, block_height, hash } => {
+            let hash = hex::encode(hash);
+
+            // package UTXO transaction block data into BlockJson
+            block_json = BlockJson::UTXOTransaction { transaction, block_height, hash };
+        },
+        Block::Coinbase { transaction, hash } => {
+            let hash = hex::encode(hash);
+
+            // package coinbase block data into BlockJson
+            block_json = BlockJson::Coinbase { transaction, hash };
+        },
     }
 
     block_json
@@ -422,6 +505,20 @@ pub async fn print_chain(blockchain: Arc<Mutex<BlockChain>>) {
                 println!(
                     "\nBlock {}: \n\tFaucet Used By: {}\n\tAccount Balance: {}\n\tTime: {}\n\tHash: {}", 
                     i, address, account_balance, time, hash_hex
+                );
+            },
+            Block::UTXOTransaction { transaction, block_height, hash } => {
+                let hash_hex = hex::encode(hash);
+                println!(
+                    "\nBlock {}: \n\tUTXO Transaction\n\tInputs: {}\n\tOutputs: {}\n\tTimestamp: {}\n\tBlock Height: {}\n\tHash: {}", 
+                    i, transaction.inputs.len(), transaction.outputs.len(), transaction.timestamp, block_height, hash_hex
+                );
+            },
+            Block::Coinbase { transaction, hash } => {
+                let hash_hex = hex::encode(hash);
+                println!(
+                    "\nBlock {}: \n\tCoinbase Transaction\n\tOutputs: {}\n\tBlock Height: {}\n\tTimestamp: {}\n\tHash: {}", 
+                    i, transaction.outputs.len(), transaction.block_height, transaction.timestamp, hash_hex
                 );
             },
         }

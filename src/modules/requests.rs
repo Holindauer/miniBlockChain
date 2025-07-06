@@ -14,6 +14,7 @@ use crate::modules::zk_proof;
 use crate::modules::network::NetworkConfig;
 use crate::modules::network;
 use crate::modules::validation::ValidatorNode;
+use crate::modules::utxo::{TxInput, TxOutput};
 
 
 /**
@@ -44,6 +45,11 @@ use crate::modules::validation::ValidatorNode;
          recipient_public_key: String,
          amount: String,
          nonce: u64,
+     },
+     UTXOTransaction {
+         inputs: Vec<TxInput>,
+         outputs: Vec<TxOutput>,
+         timestamp: u64,
      },
      Faucet {
          public_key: String,
@@ -139,6 +145,30 @@ pub async fn send_transaction_request(sender_private_key: String, recipient_publ
     let request_json: String = serde_json::to_string(&request).unwrap();    
 
     // Send the transaction request to the network
+    send_json_request_to_all_ports(request_json).await;
+}
+
+/**
+ * @notice send_utxo_transaction_request() sends a UTXO-based transaction request to the network.
+ * @param inputs - Vector of transaction inputs (UTXOs being spent)
+ * @param outputs - Vector of transaction outputs (new UTXOs being created)
+ */
+pub async fn send_utxo_transaction_request(inputs: Vec<TxInput>, outputs: Vec<TxOutput>) {
+    println!("Sending UTXO Transaction Request...");
+
+    // Package the UTXO transaction request
+    let request = NetworkRequest::UTXOTransaction {
+        inputs,
+        outputs,
+        timestamp: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    };
+    
+    let request_json: String = serde_json::to_string(&request).unwrap();
+
+    // Send the UTXO transaction request to the network
     send_json_request_to_all_ports(request_json).await;
 }
 

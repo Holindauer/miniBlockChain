@@ -175,6 +175,15 @@ async fn master_events_handler( buffer: &[u8], validator_node: ValidatorNode ) {
                     Err(e) => { eprintln!("Transaction Validation Error: {}", e); }
                 }
             },
+            Some("UTXOTransaction") => { 
+                match validation::handle_utxo_transaction_request(request, validator_node.clone()).await {
+                    Ok(success) => { 
+                        if success { println!("UTXO Transaction Validated..."); } 
+                        else { println!("UTXO Transaction Failed Validation"); }
+                    },
+                    Err(e) => { eprintln!("UTXO Transaction Validation Error: {}", e); }
+                }
+            },
             Some("Faucet") => { 
                 match validation::handle_faucet_request(request, validator_node.clone()).await {
                     Ok(_) => { println!("Faucet Request Validated..."); },

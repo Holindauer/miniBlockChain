@@ -9,6 +9,7 @@ pub mod modules {
     pub mod merkle_tree;
     pub mod network;
     pub mod requests;
+    pub mod utxo;
     pub mod validation;
     pub mod zk_proof;
 }

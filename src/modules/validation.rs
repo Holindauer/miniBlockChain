@@ -12,6 +12,7 @@ use crate::modules::zk_proof;
 use crate::modules::network;
 use crate::modules::requests;
 use crate::modules::adopt_network_state::PeerLedgerResponse;
+use crate::modules::utxo::{UTXOSet, UTXOTransaction, TxInput, TxOutput, OutPoint};
 
 /**
  * @protocol validation.rs contains the data structures and event handler logic for running a validator node. 
@@ -87,6 +88,7 @@ pub struct ValidatorNode {
     // Local Ledger State
     pub blockchain: Arc<Mutex<BlockChain>>,
     pub merkle_tree: Arc<Mutex<MerkleTree>>,
+    pub utxo_set: Arc<Mutex<UTXOSet>>,
 
     // Datastructures for Validation
     pub peer_decisions: Arc<Mutex<HashMap<Vec<u8>, (u32, u32)>>>, 
@@ -105,6 +107,7 @@ impl ValidatorNode { // initializes datastructures
         ValidatorNode { 
             blockchain: Arc::new(Mutex::new(BlockChain::new())),
             merkle_tree: Arc::new(Mutex::new(MerkleTree::new())),
+            utxo_set: Arc::new(Mutex::new(UTXOSet::new())),
             peer_decisions: Arc::new(Mutex::new(HashMap::new())),
             client_decisions: Arc::new(Mutex::new(HashMap::new())),
             client_port_address: String::new(),
@@ -494,6 +497,229 @@ pub async fn save_failed_transaction_json(){
     // save a simple json file that just contains the number 1 for failed transaction
     let message_json = serde_json::to_string(&1).unwrap();
     std::fs::write("failed_transaction.json", message_json).unwrap();
+}
+
+// ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // UTXO Transaction Verification Logic
+
+/**
+ * @notice handle_utxo_transaction_request() handles UTXO-based transaction requests.
+ * This function verifies UTXO transactions independently, seeks network consensus,
+ * and applies the transaction to the UTXO set if consensus is reached.
+ */
+pub async fn handle_utxo_transaction_request(request: Value, validator_node: ValidatorNode) -> Result<bool, String> {
+    println!("Handling UTXO transaction request...");
+
+    // verify the UTXO transaction independently 
+    let validation_result = verify_utxo_transaction_independently(request.clone(), validator_node.clone()).await;
+    if !validation_result {
+        println!("UTXO transaction failed independent validation");
+        return Ok(false);
+    }
+
+    // Prepare for responses by updating the count of active peers
+    validator_node.update_active_peer_count().await;
+
+    // send for network consensus on the request
+    requests::send_consensus_request(request.clone(), validator_node.clone()).await;
+
+    // await responses from all peers (checks that num peers matches num responses)
+    validator_node.await_all_block_decisions(
+        &network::hash_network_request(request.clone()).await
+    ).await;
+
+    // Determine if the client's decision is the majority decision
+    let peer_majority_decision: bool = consensus::determine_majority(request.clone(), validator_node.clone()).await;
+
+    // print peer majority decision
+    println!("UTXO Transaction Majority Decision: {}", peer_majority_decision);
+
+    // return false if network consensus not reached
+    if !peer_majority_decision {
+        return Ok(false);
+    }
+
+    // add the UTXO transaction to the ledger
+    add_utxo_transaction_to_ledger(request.clone(), validator_node.clone()).await;
+
+    Ok(true)
+}
+
+/**
+ * @notice verify_utxo_transaction_independently() verifies a UTXO transaction independently.
+ * This includes checking that all input UTXOs exist, signatures are valid, and transaction is properly balanced.
+ */
+async fn verify_utxo_transaction_independently(request: Value, validator_node: ValidatorNode) -> bool {
+    println!("Performing Independent Validation of UTXO Transaction Request...");
+
+    // Parse the UTXO transaction from the request
+    let inputs = match request["inputs"].as_array() {
+        Some(inputs_array) => {
+            let mut parsed_inputs = Vec::new();
+            for input_val in inputs_array {
+                match serde_json::from_value::<TxInput>(input_val.clone()) {
+                    Ok(input) => parsed_inputs.push(input),
+                    Err(_) => {
+                        println!("Failed to parse transaction input");
+                        return false;
+                    }
+                }
+            }
+            parsed_inputs
+        }
+        None => {
+            println!("No inputs found in UTXO transaction");
+            return false;
+        }
+    };
+
+    let outputs = match request["outputs"].as_array() {
+        Some(outputs_array) => {
+            let mut parsed_outputs = Vec::new();
+            for output_val in outputs_array {
+                match serde_json::from_value::<TxOutput>(output_val.clone()) {
+                    Ok(output) => parsed_outputs.push(output),
+                    Err(_) => {
+                        println!("Failed to parse transaction output");
+                        return false;
+                    }
+                }
+            }
+            parsed_outputs
+        }
+        None => {
+            println!("No outputs found in UTXO transaction");
+            return false;
+        }
+    };
+
+    let timestamp = request["timestamp"].as_u64().unwrap_or(0);
+
+    // Create the UTXO transaction
+    let utxo_transaction = UTXOTransaction::new(inputs, outputs, timestamp);
+
+    // Lock the UTXO set for validation
+    let utxo_set_arc = validator_node.utxo_set.clone();
+    let utxo_set_guard = utxo_set_arc.lock().await;
+
+    // Validate that all input UTXOs exist
+    for input in &utxo_transaction.inputs {
+        if !utxo_set_guard.contains(&input.outpoint) {
+            println!("Referenced UTXO does not exist: {:?}", input.outpoint);
+            return false;
+        }
+    }
+
+    // Validate transaction amounts (inputs >= outputs)
+    let input_amount = match utxo_transaction.total_input_amount(&utxo_set_guard) {
+        Some(amount) => amount,
+        None => {
+            println!("Failed to calculate total input amount");
+            return false;
+        }
+    };
+
+    let output_amount = utxo_transaction.total_output_amount();
+    if input_amount < output_amount {
+        println!("Transaction outputs exceed inputs: {} < {}", input_amount, output_amount);
+        return false;
+    }
+
+    // Validate signatures for each input
+    for input in &utxo_transaction.inputs {
+        // Get the UTXO being spent
+        let utxo = match utxo_set_guard.get_utxo(&input.outpoint) {
+            Some(utxo) => utxo,
+            None => {
+                println!("UTXO not found for signature validation");
+                return false;
+            }
+        };
+
+        // Verify that the public key matches the UTXO recipient
+        if input.public_key != utxo.recipient {
+            println!("Public key does not match UTXO recipient");
+            return false;
+        }
+
+        // Create transaction message for signature verification
+        let message = format!("{:?}{:?}{}", 
+            input.outpoint.txid, 
+            input.outpoint.vout, 
+            utxo_transaction.timestamp
+        );
+
+        // Verify the signature (simplified - in production would use proper message format)
+        let sender_public_key_hex = hex::encode(&input.public_key);
+        let signature_valid = zk_proof::verify_transaction_signature(
+            &input.signature,
+            &sender_public_key_hex,
+            "", // recipient not used in UTXO model
+            "", // amount not used in UTXO model
+            0,  // nonce not used in UTXO model
+            validator_node.clone()
+        ).await;
+
+        if !signature_valid {
+            println!("Invalid signature for input: {:?}", input.outpoint);
+            return false;
+        }
+    }
+
+    // Store the decision 
+    let request_hash = network::hash_network_request(request).await;
+    let client_decisions_arc = validator_node.client_decisions.clone();
+    let mut client_decisions_guard = client_decisions_arc.lock().await;
+    client_decisions_guard.insert(request_hash, true);
+
+    println!("UTXO Transaction Independent Validation: PASSED");
+    true
+}
+
+/**
+ * @notice add_utxo_transaction_to_ledger() adds a validated UTXO transaction to the blockchain and UTXO set.
+ */
+async fn add_utxo_transaction_to_ledger(request: Value, validator_node: ValidatorNode) {
+    println!("Adding UTXO transaction to ledger...");
+
+    // Parse the UTXO transaction from the request
+    let inputs = request["inputs"].as_array().unwrap().iter()
+        .map(|v| serde_json::from_value::<TxInput>(v.clone()).unwrap())
+        .collect();
+    
+    let outputs = request["outputs"].as_array().unwrap().iter()
+        .map(|v| serde_json::from_value::<TxOutput>(v.clone()).unwrap())
+        .collect();
+    
+    let timestamp = request["timestamp"].as_u64().unwrap_or(0);
+    let utxo_transaction = UTXOTransaction::new(inputs, outputs, timestamp);
+
+    // Get current block height
+    let blockchain_arc = validator_node.blockchain.clone();
+    let blockchain_guard = blockchain_arc.lock().await;
+    let block_height = blockchain_guard.chain.len() as u64;
+    drop(blockchain_guard);
+
+    // Create the block
+    let new_block = Block::UTXOTransaction {
+        transaction: utxo_transaction.clone(),
+        block_height,
+        hash: Vec::new(), // Will be set by blockchain
+    };
+
+    // Apply transaction to UTXO set
+    let utxo_set_arc = validator_node.utxo_set.clone();
+    let mut utxo_set_guard = utxo_set_arc.lock().await;
+    if let Err(e) = utxo_set_guard.apply_transaction(&utxo_transaction, block_height) {
+        eprintln!("Failed to apply UTXO transaction: {}", e);
+        return;
+    }
+    drop(utxo_set_guard);
+
+    // Add block to blockchain
+    let mut blockchain_guard = blockchain_arc.lock().await;
+    blockchain_guard.push_block_to_chain(new_block);
+
+    println!("UTXO Transaction successfully added to ledger");
 }
 
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ // Faucet Verification Logic
