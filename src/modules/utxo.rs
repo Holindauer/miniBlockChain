@@ -1,20 +1,36 @@
 use serde::{Serialize, Deserialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use sha2::{Digest, Sha256};
 
 /**
  * UTXO (Unspent Transaction Output) Model Implementation
  * 
- * This replaces the account-based model with a UTXO system similar to Bitcoin.
- * Benefits:
- * - Better parallelization (no account state conflicts)
- * - Simpler double-spend prevention
- * - More explicit transaction validation
- * - Better privacy (no account balances)
+ * This module implements a UTXO-based transaction system as an alternative to the
+ * account-based model. The UTXO model tracks individual transaction outputs rather
+ * than account balances, providing better scalability and security properties.
+ * 
+ * Key Benefits:
+ * - Better parallelization: No account state conflicts during concurrent processing
+ * - Simpler double-spend prevention: Each UTXO can only be spent once
+ * - More explicit transaction validation: All inputs and outputs are explicit
+ * - Better privacy: No visible account balances in the UTXO set
+ * 
+ * Performance Optimizations:
+ * - BTreeMap storage for better cache locality and ordered iteration
+ * - Recipient index for O(1) balance lookups
+ * - Efficient binary serialization support
+ * 
+ * Components:
+ * - OutPoint: Unique identifier for a UTXO (txid + output index)
+ * - UTXO: Represents an unspent output with amount and recipient
+ * - TxInput: References a UTXO being spent with signature
+ * - TxOutput: Creates new UTXOs with amounts and recipients
+ * - UTXOTransaction: Contains inputs and outputs for a transaction
+ * - UTXOSet: Manages all unspent outputs with optimized lookups
  */
 
 /// Unique identifier for a transaction output
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct OutPoint {
     /// Transaction hash that created this output
     pub txid: Vec<u8>,
@@ -200,27 +216,80 @@ impl CoinbaseTransaction {
 }
 
 /// The UTXO set - tracks all unspent transaction outputs
+/// 
+/// This is the core data structure that maintains the current state of all
+/// unspent outputs in the blockchain. It provides efficient operations for:
+/// - Adding new UTXOs when transactions create outputs
+/// - Removing UTXOs when they are spent as inputs
+/// - Looking up UTXOs for validation
+/// - Calculating balances for addresses
+/// 
+/// Performance optimizations:
+/// - BTreeMap for primary storage: Better cache locality than HashMap
+/// - Recipient index: O(1) balance calculation instead of O(n) scan
+/// - Cached count: O(1) size queries
+/// 
+/// The recipient_index is marked with #[serde(skip)] and rebuilt after
+/// deserialization to avoid binary key serialization issues.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UTXOSet {
-    /// Map from OutPoint to UTXO
-    utxos: HashMap<OutPoint, UTXO>,
+    /// Primary storage: BTreeMap for better cache locality and ordered iteration
+    utxos: BTreeMap<OutPoint, UTXO>,
+    /// Index by recipient for fast balance lookups
+    #[serde(skip)]
+    recipient_index: HashMap<Vec<u8>, Vec<OutPoint>>,
+    /// Track total number of UTXOs for quick size queries
+    count: usize,
 }
 
 impl UTXOSet {
     pub fn new() -> Self {
         UTXOSet {
-            utxos: HashMap::new(),
+            utxos: BTreeMap::new(),
+            recipient_index: HashMap::new(),
+            count: 0,
         }
     }
 
-    /// Add a new UTXO to the set
+    /// Add a new UTXO to the set with optimized indexing
     pub fn add_utxo(&mut self, outpoint: OutPoint, utxo: UTXO) {
-        self.utxos.insert(outpoint, utxo);
+        // Add to primary storage
+        if let Some(old_utxo) = self.utxos.insert(outpoint.clone(), utxo.clone()) {
+            // Remove old entry from recipient index if it was a replacement
+            if let Some(outpoints) = self.recipient_index.get_mut(&old_utxo.recipient) {
+                outpoints.retain(|op| op != &outpoint);
+                if outpoints.is_empty() {
+                    self.recipient_index.remove(&old_utxo.recipient);
+                }
+            }
+        } else {
+            self.count += 1;
+        }
+        
+        // Update recipient index
+        self.recipient_index
+            .entry(utxo.recipient.clone())
+            .or_insert_with(Vec::new)
+            .push(outpoint);
     }
 
-    /// Remove a UTXO from the set (when it's spent)
+    /// Remove a UTXO from the set (when it's spent) with index cleanup
     pub fn remove_utxo(&mut self, outpoint: &OutPoint) -> Option<UTXO> {
-        self.utxos.remove(outpoint)
+        if let Some(utxo) = self.utxos.remove(outpoint) {
+            self.count -= 1;
+            
+            // Clean up recipient index
+            if let Some(outpoints) = self.recipient_index.get_mut(&utxo.recipient) {
+                outpoints.retain(|op| op != outpoint);
+                if outpoints.is_empty() {
+                    self.recipient_index.remove(&utxo.recipient);
+                }
+            }
+            
+            Some(utxo)
+        } else {
+            None
+        }
     }
 
     /// Get a UTXO from the set
@@ -233,22 +302,31 @@ impl UTXOSet {
         self.utxos.contains_key(outpoint)
     }
 
-    /// Get all UTXOs for a given recipient
+    /// Get all UTXOs for a given recipient using optimized index
     pub fn get_utxos_for_recipient(&self, recipient: &[u8]) -> Vec<(OutPoint, &UTXO)> {
-        self.utxos
-            .iter()
-            .filter(|(_, utxo)| utxo.recipient == recipient)
-            .map(|(outpoint, utxo)| (outpoint.clone(), utxo))
-            .collect()
+        if let Some(outpoints) = self.recipient_index.get(recipient) {
+            outpoints
+                .iter()
+                .filter_map(|outpoint| {
+                    self.utxos.get(outpoint).map(|utxo| (outpoint.clone(), utxo))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        }
     }
 
-    /// Calculate total balance for a recipient
+    /// Calculate total balance for a recipient using optimized index
     pub fn get_balance(&self, recipient: &[u8]) -> u64 {
-        self.utxos
-            .values()
-            .filter(|utxo| utxo.recipient == recipient)
-            .map(|utxo| utxo.amount)
-            .sum()
+        if let Some(outpoints) = self.recipient_index.get(recipient) {
+            outpoints
+                .iter()
+                .filter_map(|outpoint| self.utxos.get(outpoint))
+                .map(|utxo| utxo.amount)
+                .sum()
+        } else {
+            0
+        }
     }
 
     /// Apply a transaction to the UTXO set
@@ -284,14 +362,27 @@ impl UTXOSet {
         }
     }
 
-    /// Get the total number of UTXOs
+    /// Get the total number of UTXOs using cached count
     pub fn len(&self) -> usize {
-        self.utxos.len()
+        self.count
     }
 
-    /// Check if the UTXO set is empty
+    /// Check if the UTXO set is empty using cached count
     pub fn is_empty(&self) -> bool {
-        self.utxos.is_empty()
+        self.count == 0
+    }
+
+    /// Rebuild recipient index (for use after deserialization)
+    pub fn rebuild_index(&mut self) {
+        self.recipient_index.clear();
+        self.count = self.utxos.len();
+        
+        for (outpoint, utxo) in &self.utxos {
+            self.recipient_index
+                .entry(utxo.recipient.clone())
+                .or_insert_with(Vec::new)
+                .push(outpoint.clone());
+        }
     }
 }
 

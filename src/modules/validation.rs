@@ -104,10 +104,13 @@ pub struct ValidatorNode {
 
 impl ValidatorNode { // initializes datastructures
     pub fn new() -> ValidatorNode {
+        let mut utxo_set = UTXOSet::new();
+        utxo_set.rebuild_index(); // Initialize the index
+        
         ValidatorNode { 
             blockchain: Arc::new(Mutex::new(BlockChain::new())),
             merkle_tree: Arc::new(Mutex::new(MerkleTree::new())),
-            utxo_set: Arc::new(Mutex::new(UTXOSet::new())),
+            utxo_set: Arc::new(Mutex::new(utxo_set)),
             peer_decisions: Arc::new(Mutex::new(HashMap::new())),
             client_decisions: Arc::new(Mutex::new(HashMap::new())),
             client_port_address: String::new(),
@@ -548,7 +551,7 @@ pub async fn handle_utxo_transaction_request(request: Value, validator_node: Val
  * @notice verify_utxo_transaction_independently() verifies a UTXO transaction independently.
  * This includes checking that all input UTXOs exist, signatures are valid, and transaction is properly balanced.
  */
-async fn verify_utxo_transaction_independently(request: Value, validator_node: ValidatorNode) -> bool {
+pub async fn verify_utxo_transaction_independently(request: Value, validator_node: ValidatorNode) -> bool {
     println!("Performing Independent Validation of UTXO Transaction Request...");
 
     // Parse the UTXO transaction from the request

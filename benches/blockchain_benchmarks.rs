@@ -4,6 +4,7 @@ use mini_block_chain::modules::{
     merkle_tree::{MerkleTree, Account},
     zk_proof,
     validation::ValidatorNode,
+    utxo::{UTXOSet, UTXOTransaction, TxInput, TxOutput, OutPoint, UTXO},
 };
 use std::time::Duration;
 
@@ -185,12 +186,177 @@ fn benchmark_json_serialization(c: &mut Criterion) {
     group.finish();
 }
 
+fn benchmark_utxo_operations(c: &mut Criterion) {
+    let mut group = c.benchmark_group("utxo_operations");
+    
+    // Setup test data
+    let mut utxo_set = UTXOSet::new();
+    let mut test_utxos = Vec::new();
+    
+    // Create 1000 test UTXOs
+    for i in 0..1000 {
+        let outpoint = OutPoint::new(vec![i as u8; 32], i % 4);
+        let utxo = UTXO::new((100 + i) as u64, vec![(i % 256) as u8; 33], 1, 12345);
+        utxo_set.add_utxo(outpoint.clone(), utxo.clone());
+        test_utxos.push((outpoint, utxo));
+    }
+    
+    group.bench_function("utxo_lookup", |b| {
+        b.iter(|| {
+            let index = black_box(42);
+            utxo_set.get_utxo(&test_utxos[index].0)
+        });
+    });
+    
+    group.bench_function("utxo_contains_check", |b| {
+        b.iter(|| {
+            let index = black_box(42);
+            utxo_set.contains(&test_utxos[index].0)
+        });
+    });
+    
+    group.bench_function("utxo_balance_calculation", |b| {
+        let recipient = vec![42u8; 33];
+        b.iter(|| {
+            utxo_set.get_balance(black_box(&recipient))
+        });
+    });
+    
+    group.finish();
+}
+
+fn benchmark_utxo_transaction_creation(c: &mut Criterion) {
+    let mut group = c.benchmark_group("utxo_transaction");
+    
+    group.bench_function("create_utxo_transaction", |b| {
+        let input = TxInput {
+            outpoint: OutPoint::new(vec![1, 2, 3], 0),
+            signature: "signature".to_string(),
+            public_key: vec![4, 5, 6],
+        };
+        let output = TxOutput {
+            amount: 100,
+            recipient: vec![7, 8, 9],
+        };
+        
+        b.iter(|| {
+            UTXOTransaction::new(
+                black_box(vec![input.clone()]),
+                black_box(vec![output.clone()]),
+                black_box(12345)
+            )
+        });
+    });
+    
+    group.bench_function("utxo_transaction_hash", |b| {
+        let input = TxInput {
+            outpoint: OutPoint::new(vec![1, 2, 3], 0),
+            signature: "signature".to_string(),
+            public_key: vec![4, 5, 6],
+        };
+        let output = TxOutput {
+            amount: 100,
+            recipient: vec![7, 8, 9],
+        };
+        let tx = UTXOTransaction::new(vec![input], vec![output], 12345);
+        
+        b.iter(|| {
+            black_box(&tx).compute_hash()
+        });
+    });
+    
+    group.finish();
+}
+
+fn benchmark_utxo_transaction_validation(c: &mut Criterion) {
+    let mut group = c.benchmark_group("utxo_validation");
+    group.measurement_time(Duration::from_secs(10));
+    
+    // Setup: Create UTXO set with test UTXOs
+    let mut utxo_set = UTXOSet::new();
+    let prev_outpoint = OutPoint::new(vec![1, 2, 3], 0);
+    let prev_utxo = UTXO::new(1000, vec![4, 5, 6], 1, 12345);
+    utxo_set.add_utxo(prev_outpoint.clone(), prev_utxo);
+    
+    // Create transaction spending that UTXO
+    let input = TxInput {
+        outpoint: prev_outpoint,
+        signature: "signature".to_string(),
+        public_key: vec![4, 5, 6],
+    };
+    let output = TxOutput {
+        amount: 900,
+        recipient: vec![7, 8, 9],
+    };
+    let tx = UTXOTransaction::new(vec![input], vec![output], 12345);
+    
+    group.bench_function("validate_utxo_amounts", |b| {
+        b.iter(|| {
+            let input_amount = black_box(&tx).total_input_amount(black_box(&utxo_set));
+            let output_amount = black_box(&tx).total_output_amount();
+            input_amount.unwrap_or(0) >= output_amount
+        });
+    });
+    
+    group.bench_function("apply_utxo_transaction", |b| {
+        b.iter_batched(
+            || {
+                // Setup: Clone UTXO set for each iteration
+                let set = utxo_set.clone();
+                (set, tx.clone())
+            },
+            |(mut set, transaction)| {
+                // Benchmark: Apply transaction
+                set.apply_transaction(&transaction, 2).ok()
+            },
+            criterion::BatchSize::SmallInput
+        );
+    });
+    
+    group.finish();
+}
+
+fn benchmark_utxo_serialization(c: &mut Criterion) {
+    let mut group = c.benchmark_group("utxo_serialization");
+    
+    let input = TxInput {
+        outpoint: OutPoint::new(vec![1, 2, 3], 0),
+        signature: "signature".to_string(),
+        public_key: vec![4, 5, 6],
+    };
+    let output = TxOutput {
+        amount: 100,
+        recipient: vec![7, 8, 9],
+    };
+    let tx = UTXOTransaction::new(vec![input], vec![output], 12345);
+    
+    group.bench_function("serialize_utxo_transaction", |b| {
+        b.iter(|| {
+            serde_json::to_string(black_box(&tx)).unwrap()
+        });
+    });
+    
+    let json_str = serde_json::to_string(&tx).unwrap();
+    
+    group.bench_function("deserialize_utxo_transaction", |b| {
+        b.iter(|| {
+            serde_json::from_str::<UTXOTransaction>(black_box(&json_str)).unwrap()
+        });
+    });
+    
+    group.finish();
+}
+
 criterion_group!(
     benches,
     benchmark_signature_generation,
     benchmark_signature_verification,
     benchmark_merkle_tree_operations,
     benchmark_blockchain_operations,
-    benchmark_json_serialization
+    benchmark_json_serialization,
+    benchmark_utxo_operations,
+    benchmark_utxo_transaction_creation,
+    benchmark_utxo_transaction_validation,
+    benchmark_utxo_serialization
 );
 criterion_main!(benches);

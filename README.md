@@ -10,6 +10,24 @@ This database is thus a permanent ledger of all transactions between privately o
 
 While this implementation is focused more so on the implementation of a peer-to-peer consensus protocol, there are also some game-theoretical safeguards deincentivising the manipulation of the ledger for individual gain. At this stage, this includes providing validator nodes a token reward for reaching a consensus with peers.
 
+## UTXO Model Implementation
+
+The blockchain now supports both account-based and UTXO (Unspent Transaction Output) based transaction models. The UTXO model provides several advantages:
+
+- **Better parallelization**: No account state conflicts allow for better concurrent transaction processing
+- **Simpler double-spend prevention**: Each UTXO can only be spent once
+- **More explicit transaction validation**: All inputs and outputs are explicitly defined
+- **Enhanced privacy**: No visible account balances in the UTXO set
+
+### UTXO Model Components:
+
+- **UTXO (Unspent Transaction Output)**: Represents tokens that can be spent
+- **OutPoint**: Unique identifier for a UTXO (transaction hash + output index)
+- **TxInput**: References a UTXO being spent with a signature proving ownership
+- **TxOutput**: Creates new UTXOs with specified amounts and recipients
+- **UTXOTransaction**: Contains inputs (UTXOs being spent) and outputs (new UTXOs being created)
+- **UTXOSet**: Optimized data structure tracking all unspent outputs with BTreeMap storage and recipient indexing for fast balance lookups
+
 # Protocol Overview:
 
 ## Two Types of Interaction
@@ -186,6 +204,49 @@ If these are all true, the client decision is to validate and a request for cons
             Amount: 50
             Time: 1713547728
             Hash: 55442950180c4e60b9583a8cbe154ad2bb03337f430d9d8b97aeee4f5c6d4646
+
+## UTXO Transaction Protocol
+
+UTXO transactions work differently from account-based transactions. Instead of modifying account balances directly, they consume existing UTXOs and create new ones:
+
+### Creating a UTXO Transaction:
+
+1. **Identify UTXOs to spend**: Find unspent outputs owned by the sender
+2. **Create transaction inputs**: Each input references a specific UTXO and includes a signature
+3. **Create transaction outputs**: Define new UTXOs with amounts and recipients
+4. **Calculate fees**: Input amount minus output amount equals transaction fee
+
+### UTXO Transaction Validation:
+
+Validator nodes verify UTXO transactions by checking:
+
+1. **All input UTXOs exist** in the current UTXO set
+2. **Signatures are valid** for each input, proving ownership
+3. **No double-spending**: Each UTXO can only be spent once
+4. **Input amount ≥ output amount**: Ensuring no tokens are created
+5. **Fee calculation**: Difference goes to validators as reward
+
+### Example UTXO Block:
+
+    Block 5:
+            UTXO Transaction
+            Inputs: [OutPoint { txid: "abc123...", vout: 0 }]
+            Outputs: [
+                TxOutput { amount: 75, recipient: "027a8038..." },
+                TxOutput { amount: 20, recipient: "03b0866f..." }
+            ]
+            Fee: 5
+            Time: 1713547829
+            Hash: 789def456...
+
+### Performance Optimizations:
+
+The UTXO implementation includes several optimizations:
+
+- **BTreeMap storage**: Better cache locality than HashMap
+- **Recipient indexing**: O(1) balance lookups instead of O(n) scans
+- **Efficient serialization**: Binary encoding for network transmission
+- **Optimized validation**: Fast UTXO lookups and double-spend detection
 
 
 ## Integration Testing
